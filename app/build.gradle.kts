@@ -44,14 +44,25 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
-    // CameraX dependencies
-    val cameraxVersion = "1.3.4"
+    // CameraX dependencies - 1.4.0 is more stable in this env
+    val cameraxVersion = "1.4.0"
     implementation("androidx.camera:camera-core:${cameraxVersion}")
     implementation("androidx.camera:camera-camera2:${cameraxVersion}")
     implementation("androidx.camera:camera-lifecycle:${cameraxVersion}")
     implementation("androidx.camera:camera-video:${cameraxVersion}")
     implementation("androidx.camera:camera-view:${cameraxVersion}")
     implementation("androidx.camera:camera-extensions:${cameraxVersion}")
+
+    // RTMP Streaming dependencies
+    val rootEncoderVersion = "2.4.5"
+    implementation("com.github.pedroSG94.RootEncoder:library:${rootEncoderVersion}")
+
+    // ExoPlayer for remote viewing
+    val media3Version = "1.4.1"
+    implementation("androidx.media3:media3-exoplayer:${media3Version}")
+    implementation("androidx.media3:media3-exoplayer-rtsp:${media3Version}")
+    implementation("androidx.media3:media3-datasource-rtmp:${media3Version}")
+    implementation("androidx.media3:media3-ui:${media3Version}")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
