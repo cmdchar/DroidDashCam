@@ -1,9 +1,11 @@
 package com.helge.droiddashcam
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.rtmp.RtmpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -25,6 +27,8 @@ class ViewerActivity : AppCompatActivity() {
             val url = viewBinding.rtspUrlInput.text.toString()
             if (url.isNotEmpty()) {
                 startPlaying(url)
+            } else {
+                Toast.makeText(this, "Please enter stream URL", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -35,6 +39,23 @@ class ViewerActivity : AppCompatActivity() {
         val exoPlayer = ExoPlayer.Builder(this).build()
         player = exoPlayer
         viewBinding.videoView.player = exoPlayer
+
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                val status = when(state) {
+                    Player.STATE_IDLE -> "Status: Idle"
+                    Player.STATE_BUFFERING -> "Status: Buffering..."
+                    Player.STATE_READY -> "Status: Playing (PIP Mixed Stream)"
+                    Player.STATE_ENDED -> "Status: Ended"
+                    else -> "Status: Unknown"
+                }
+                viewBinding.connectionStatus.text = status
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                viewBinding.connectionStatus.text = "Status: Error - ${error.message}"
+            }
+        })
 
         val mediaItem = MediaItem.fromUri(url)
         val mediaSource = if (url.startsWith("rtsp://")) {

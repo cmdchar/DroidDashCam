@@ -29,6 +29,7 @@ import androidx.core.content.PermissionChecker
 import com.helge.droiddashcam.databinding.ActivityMainBinding
 import com.pedro.common.ConnectChecker
 import com.pedro.library.rtmp.RtmpStream
+import com.pedro.encoder.input.gl.render.filters.`object`.SurfaceFilterRender
 import java.text.SimpleDateFormat
 import java.util.ArrayList
 import java.util.Locale
@@ -44,10 +45,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     private lateinit var cameraExecutor: ExecutorService
 
-    private var backStream: RtmpStream? = null
-    private var frontStream: RtmpStream? = null
-
-    private var isStreaming = false
+    private var rtmpStream: RtmpStream? = null
+    private var isStreamingActive = false
+    private var surfaceFilter: SurfaceFilterRender? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,79 +73,58 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     private fun toggleStream() {
-        if (!isStreaming) {
-            val baseUrl = viewBinding.rtmpUrlInput.text.toString()
-            if (baseUrl.isEmpty()) {
-                Toast.makeText(this, "Please enter base RTMP URL", Toast.LENGTH_SHORT).show()
+        if (!isStreamingActive) {
+            val url = viewBinding.rtmpUrlInput.text.toString()
+            if (url.isEmpty()) {
+                Toast.makeText(this, "Please enter RTMP URL", Toast.LENGTH_SHORT).show()
                 return
             }
-
-            startStreaming(baseUrl)
+            startStreaming(url)
         } else {
             stopStreaming()
         }
     }
 
-    private fun startStreaming(baseUrl: String) {
-        val backUrl = if (baseUrl.endsWith("/")) "${baseUrl}back" else "$baseUrl/back"
-        val frontUrl = if (baseUrl.endsWith("/")) "${baseUrl}front" else "$baseUrl/front"
-
+    private fun startStreaming(url: String) {
         try {
-            backStream = RtmpStream(this, this).apply {
+            rtmpStream = RtmpStream(this, this).apply {
                 if (prepareVideo(1280, 720, 30, 2000 * 1000, 0, 2) &&
                     prepareAudio(44100, true, 128 * 1000, false, false)) {
-                    startStream(backUrl)
-                }
-            }
 
-            val isConcurrent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
-            } else false
+                    val isConcurrent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
+                    } else false
 
-            if (isConcurrent) {
-                frontStream = RtmpStream(this, object : ConnectChecker {
-                    override fun onConnectionStarted(url: String) {}
-                    override fun onConnectionSuccess() {}
-                    override fun onConnectionFailed(reason: String) {}
-                    override fun onNewBitrate(bitrate: Long) {}
-                    override fun onDisconnect() {}
-                    override fun onAuthError() {}
-                    override fun onAuthSuccess() {}
-                }).apply {
-                    if (prepareVideo(640, 480, 30, 1000 * 1000, 0, 2) &&
-                        prepareAudio(44100, true, 128 * 1000, false, false)) {
-                        startStream(frontUrl)
+                    if (isConcurrent) {
+                        surfaceFilter = SurfaceFilterRender().apply {
+                            setScale(30f, 30f)
+                            setPosition(70f, 70f)
+                        }
+                        getGlInterface().setFilter(surfaceFilter!!)
                     }
+
+                    startStream(url)
+                    isStreamingActive = true
+                    viewBinding.streamButton.text = getString(R.string.stop_stream)
+                    Toast.makeText(this@MainActivity, "Streaming started", Toast.LENGTH_SHORT).show()
+                    startCamera()
+                } else {
+                    Toast.makeText(this@MainActivity, "Error preparing stream", Toast.LENGTH_SHORT).show()
                 }
             }
-
-            isStreaming = true
-            viewBinding.streamButton.text = getString(R.string.stop_stream)
-            Toast.makeText(this, "Streaming started", Toast.LENGTH_SHORT).show()
-
-            // Re-bind camera to include streaming use cases
-            startCamera()
-
         } catch (e: Exception) {
-            Log.e(TAG, "Streaming failed to start", e)
-            stopStreaming()
+            Log.e(TAG, "Streaming failed", e)
         }
     }
 
     private fun stopStreaming() {
-        backStream?.stopStream()
-        backStream?.release()
-        backStream = null
-
-        frontStream?.stopStream()
-        frontStream?.release()
-        frontStream = null
-
-        isStreaming = false
+        rtmpStream?.stopStream()
+        rtmpStream?.release()
+        rtmpStream = null
+        surfaceFilter = null
+        isStreamingActive = false
         viewBinding.streamButton.text = getString(R.string.start_stream)
         Toast.makeText(this, "Streaming stopped", Toast.LENGTH_SHORT).show()
-
-        // Re-bind camera to remove streaming use cases
         startCamera()
     }
 
@@ -249,23 +228,21 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         val frontGroupBuilder = UseCaseGroup.Builder()
             .addUseCase(frontPreview)
 
-        // Add streaming use cases if active
-        backStream?.let { stream ->
-            val backStreamPreview = Preview.Builder().build()
-            backStreamPreview.setSurfaceProvider { request ->
-                val surface = stream.getGlInterface().surface
-                request.provideSurface(surface, ContextCompat.getMainExecutor(this)) {}
+        // Mixed Stream (PIP) logic
+        rtmpStream?.let { stream ->
+            val streamPreviewBack = Preview.Builder().build()
+            streamPreviewBack.setSurfaceProvider { request ->
+                request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(this)) {}
             }
-            backGroupBuilder.addUseCase(backStreamPreview)
-        }
+            backGroupBuilder.addUseCase(streamPreviewBack)
 
-        frontStream?.let { stream ->
-            val frontStreamPreview = Preview.Builder().build()
-            frontStreamPreview.setSurfaceProvider { request ->
-                val surface = stream.getGlInterface().surface
-                request.provideSurface(surface, ContextCompat.getMainExecutor(this)) {}
+            surfaceFilter?.let { filter ->
+                val streamPreviewFront = Preview.Builder().build()
+                streamPreviewFront.setSurfaceProvider { request ->
+                    request.provideSurface(filter.surface, ContextCompat.getMainExecutor(this)) {}
+                }
+                frontGroupBuilder.addUseCase(streamPreviewFront)
             }
-            frontGroupBuilder.addUseCase(frontStreamPreview)
         }
 
         val backConfig = ConcurrentCamera.SingleCameraConfig(
@@ -306,11 +283,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             .addUseCase(preview)
             .addUseCase(videoCapture!!)
 
-        backStream?.let { stream ->
+        rtmpStream?.let { stream ->
             val streamPreview = Preview.Builder().build()
             streamPreview.setSurfaceProvider { request ->
-                val surface = stream.getGlInterface().surface
-                request.provideSurface(surface, ContextCompat.getMainExecutor(this)) {}
+                request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(this)) {}
             }
             groupBuilder.addUseCase(streamPreview)
         }
@@ -338,8 +314,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
-        backStream?.release()
-        frontStream?.release()
+        rtmpStream?.release()
         _viewBinding = null
     }
 
@@ -367,7 +342,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun onConnectionFailed(reason: String) {
         runOnUiThread {
             Toast.makeText(this, "Stream connection failed: $reason", Toast.LENGTH_SHORT).show()
-            if (!isStreaming) viewBinding.streamButton.text = getString(R.string.start_stream)
+            if (!isStreamingActive) viewBinding.streamButton.text = getString(R.string.start_stream)
         }
     }
     override fun onNewBitrate(bitrate: Long) {}
