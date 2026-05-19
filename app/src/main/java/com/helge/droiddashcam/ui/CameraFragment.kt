@@ -87,7 +87,9 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        requireContext().registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        try {
+            requireContext().registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        } catch (e: Exception) {}
     }
 
     private fun setupButtons() {
@@ -207,12 +209,17 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     }
 
     private fun setupSensors() {
-        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        val hasGps = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (hasGps) {
             locationManager = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
             try {
                 locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this)
                 binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.green_status))
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.yellow_status))
+            }
+        } else {
+            binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.grey_800))
         }
 
         sensorManager = requireContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -224,6 +231,19 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     override fun onLocationChanged(location: Location) {
         val speedKmh = (location.speed * 3.6).toInt()
         binding.textSpeed.text = "$speedKmh km/h"
+        binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.green_status))
+    }
+
+    override fun onProviderEnabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER) {
+            binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.yellow_status))
+        }
+    }
+
+    override fun onProviderDisabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER) {
+            binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.grey_800))
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
