@@ -1,9 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DroidDashCam</string>
-    <string name="camera_permission_denied">Camera permission is required to use this app.</string>
-    <string name="start_capture">Start Capture</string>
-    <string name="stop_capture">Stop Capture</string>
-    <string name="start_stream">Start Stream</string>
-    <string name="stop_stream">Stop Stream</string>
-    <string name="view_remote">View Remote Dashcam</string>
+    <string name="app_name">DroidDashCam Pro</string>
+    <string name="google_maps_key">YOUR_API_KEY_HERE</string>
 </resources>

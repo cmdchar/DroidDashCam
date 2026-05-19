@@ -19,6 +19,7 @@ import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
@@ -33,6 +34,9 @@ import com.helge.droiddashcam.databinding.FragmentCameraBinding
 import com.pedro.common.ConnectChecker
 import com.pedro.library.rtmp.RtmpStream
 import com.pedro.encoder.input.gl.render.filters.`object`.SurfaceFilterRender
+import com.helge.droiddashcam.utils.StorageManager
+import com.helge.droiddashcam.utils.TelemetryRecorder
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -55,12 +59,33 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     private var locationManager: LocationManager? = null
     private var sensorManager: SensorManager? = null
 
+    private var currentVideoUri: android.net.Uri? = null
+    private var telemetryRecorder: TelemetryRecorder? = null
+    private var lastKnownLocation: Location? = null
+
+    // Drive Stats
+    private var maxSpeed = 0f
+    private var incidentCount = 0
+    private var driveStartTime = 0L
+
     private val updateTimerRunnable = object : Runnable {
         override fun run() {
             if (recording != null) {
                 val elapsed = System.currentTimeMillis() - recordingStartTime
                 binding.textRecTime.text = formatElapsedTime(elapsed)
-                handler.postDelayed(this, 1000)
+
+                lastKnownLocation?.let { loc ->
+                    telemetryRecorder?.addData(loc.latitude, loc.longitude, loc.speed)
+                }
+
+                val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+                val loopDurationStr = prefs.getString("loop_duration", "5") ?: "5"
+                val loopDurationMin = loopDurationStr.toLong()
+                if (elapsed >= loopDurationMin * 60 * 1000) {
+                    restartRecording()
+                } else {
+                    handler.postDelayed(this, 1000)
+                }
             }
         }
     }
@@ -90,6 +115,8 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         try {
             requireContext().registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         } catch (e: Exception) {}
+
+        updateStorageText()
     }
 
     private fun setupButtons() {
@@ -160,9 +187,17 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     private fun toggleRecording() {
         if (recording != null) {
             stopRecording()
+            showDriveSummary()
         } else {
+            startDriveSession()
             startRecording()
         }
+    }
+
+    private fun startDriveSession() {
+        driveStartTime = System.currentTimeMillis()
+        maxSpeed = 0f
+        incidentCount = 0
     }
 
     private fun startRecording() {
@@ -170,6 +205,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
         binding.recLayout.visibility = View.VISIBLE
         startRecAnimation()
+        StorageManager.cleanupOldFiles(requireContext())
 
         val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val contentValues = ContentValues().apply {
@@ -191,13 +227,34 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             .start(ContextCompat.getMainExecutor(requireContext())) { recordEvent ->
                 if (recordEvent is VideoRecordEvent.Start) {
                     recordingStartTime = System.currentTimeMillis()
+                    // Initialize telemetry recording with the planned name
+                    // MediaStore usually adds .mp4 extension
+                    telemetryRecorder = TelemetryRecorder(requireContext(), "$name.mp4")
                     handler.post(updateTimerRunnable)
                 } else if (recordEvent is VideoRecordEvent.Finalize) {
+                    val uri = recordEvent.outputResults.outputUri
+                    currentVideoUri = uri
+
                     if (recordEvent.hasError()) {
                         Log.e("CameraFragment", "Recording error: ${recordEvent.error}")
+                        telemetryRecorder = null
+                    } else {
+                        // Sync telemetry filename if MediaStore changed it
+                        val actualName = getDisplayNameFromUri(uri)
+                        if (actualName != null && actualName != "$name.mp4") {
+                            // Rare case where name collided and MediaStore renamed it
+                            renameTelemetryFile("$name.mp4", actualName)
+                        }
+                        telemetryRecorder?.save()
+                        telemetryRecorder = null
                     }
                 }
             }
+    }
+
+    private fun restartRecording() {
+        recording?.stop()
+        startRecording()
     }
 
     private fun stopRecording() {
@@ -206,6 +263,44 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         binding.recLayout.visibility = View.GONE
         binding.recDot.clearAnimation()
         handler.removeCallbacks(updateTimerRunnable)
+        updateStorageText()
+    }
+
+    private fun showDriveSummary() {
+        val duration = (System.currentTimeMillis() - driveStartTime) / 1000 / 60
+        AlertDialog.Builder(requireContext(), R.style.Theme_DroidDashCam)
+            .setTitle("Drive Summary")
+            .setMessage("Duration: $duration min\nMax Speed: ${(maxSpeed * 3.6).toInt()} km/h\nIncidents detected: $incidentCount")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun renameTelemetryFile(oldName: String, newName: String) {
+        try {
+            val dir = requireContext().getExternalFilesDir("telemetry")
+            val oldFile = File(dir, "$oldName.json")
+            val newFile = File(dir, "$newName.json")
+            if (oldFile.exists()) {
+                oldFile.renameTo(newFile)
+            }
+        } catch (e: Exception) {
+            Log.e("CameraFragment", "Error renaming telemetry file", e)
+        }
+    }
+
+    private fun getDisplayNameFromUri(uri: android.net.Uri): String? {
+        val projection = arrayOf(MediaStore.Video.Media.DISPLAY_NAME)
+        requireContext().contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                return cursor.getString(columnIndex)
+            }
+        }
+        return null
+    }
+
+    private fun updateStorageText() {
+        Log.d("CameraFragment", StorageManager.getAvailableSpaceText())
     }
 
     private fun setupSensors() {
@@ -218,8 +313,6 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             } catch (e: Exception) {
                 binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.yellow_status))
             }
-        } else {
-            binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.grey_800))
         }
 
         sensorManager = requireContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -229,7 +322,11 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     }
 
     override fun onLocationChanged(location: Location) {
-        val speedKmh = (location.speed * 3.6).toInt()
+        lastKnownLocation = location
+        val speed = location.speed
+        if (speed > maxSpeed) maxSpeed = speed
+
+        val speedKmh = (speed * 3.6).toInt()
         binding.textSpeed.text = "$speedKmh km/h"
         binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.green_status))
     }
@@ -248,12 +345,29 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event?.sensor?.type == Sensor.TYPE_ACCELEROMETER) {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+            if (!prefs.getBoolean("impact_detection", true)) return
+
             val x = event.values[0]
             val y = event.values[1]
             val z = event.values[2]
             val acceleration = Math.sqrt((x * x + y * y + z * z).toDouble())
-            if (acceleration > 15) {
-                lockCurrentClip()
+
+            val sensitivity = prefs.getInt("g_sensor_sensitivity", 5)
+            val threshold = 31.0 - (sensitivity * 2.0)
+
+            if (acceleration > threshold) {
+                if (recording != null) {
+                    incidentCount++
+                    lockCurrentClip()
+                    // Visual feedback for incident
+                    binding.root.post {
+                        binding.btnLock.setColorFilter(ContextCompat.getColor(requireContext(), R.color.red_rec))
+                        handler.postDelayed({
+                            binding.btnLock.clearColorFilter()
+                        }, 2000)
+                    }
+                }
             }
         }
     }
@@ -279,7 +393,12 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     }
 
     private fun lockCurrentClip() {
-        Toast.makeText(context, "Clip Locked / Protected", Toast.LENGTH_SHORT).show()
+        currentVideoUri?.let { uri ->
+            StorageManager.lockFile(requireContext(), uri)
+            Toast.makeText(context, "Clip Protected", Toast.LENGTH_SHORT).show()
+        } ?: run {
+            Toast.makeText(context, "No active recording to lock", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun startCamera() {
