@@ -2,15 +2,19 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/black">
 
     <EditText
         android:id="@+id/rtspUrlInput"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_margin="16dp"
-        android:hint="RTMP URL (e.g. rtmp://ip/live/stream)"
-        android:inputType="textUri"
+        android:background="#40FFFFFF"
+        android:hint="RTMP URL (e.g. rtmp://ip/live/dashcam)"
+        android:padding="12dp"
+        android:textColor="@color/white"
+        android:textColorHint="#A0FFFFFF"
         app:layout_constraintEnd_toStartOf="@id/playButton"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
@@ -31,7 +35,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:text="Status: Idle"
-        android:textColor="@color/black"
+        android:textColor="@color/yellow_status"
         app:layout_constraintTop_toBottomOf="@id/rtspUrlInput"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />

@@ -1,0 +1,62 @@
+<PreferenceScreen
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory app:title="Recording Settings">
+        <ListPreference
+            app:defaultValue="1080p"
+            app:entries="@array/video_quality_entries"
+            app:entryValues="@array/video_quality_values"
+            app:key="video_quality"
+            app:title="Video Quality" />
+
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="loop_recording"
+            app:title="Loop Recording"
+            app:summary="Automatically delete old clips when storage is full" />
+
+        <ListPreference
+            app:defaultValue="5"
+            app:entries="@array/loop_duration_entries"
+            app:entryValues="@array/loop_duration_values"
+            app:key="loop_duration"
+            app:title="Clip Duration (Minutes)" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Safety and Sensors">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="impact_detection"
+            app:title="Impact Detection (G-Sensor)"
+            app:summary="Automatically protect clips during sudden braking or impact" />
+
+        <SeekBarPreference
+            app:defaultValue="5"
+            app:key="g_sensor_sensitivity"
+            app:title="G-Sensor Sensitivity"
+            app:min="1"
+            android:max="10" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Remote Monitoring">
+        <EditTextPreference
+            app:key="rtmp_url"
+            app:title="Base RTMP URL"
+            app:summary="e.g. rtmp://your-server/live" />
+
+        <Preference
+            app:key="remote_viewer"
+            app:title="Open Remote Viewer"
+            app:summary="Watch other dashcam feeds from this device" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Automation">
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:key="bluetooth_autostart"
+            app:title="Bluetooth Auto-Start"
+            app:summary="Start recording when connected to car Bluetooth" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

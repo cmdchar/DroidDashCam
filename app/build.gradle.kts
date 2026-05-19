@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("androidx.navigation.safeargs.kotlin")
 }
 
 android {
@@ -9,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.helge.droiddashcam"
-        minSdk = 21
+        minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -44,7 +45,22 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
-    // CameraX dependencies - 1.4.0 is more stable in this env
+    // Navigation
+    val navVersion = "2.8.3"
+    implementation("androidx.navigation:navigation-fragment-ktx:$navVersion")
+    implementation("androidx.navigation:navigation-ui-ktx:$navVersion")
+
+    // Preference
+    implementation("androidx.preference:preference-ktx:1.2.1")
+
+    // Glide for thumbnails
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+
+    // Google Maps & Location
+    implementation("com.google.android.gms:play-services-maps:19.0.0")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // CameraX
     val cameraxVersion = "1.4.0"
     implementation("androidx.camera:camera-core:${cameraxVersion}")
     implementation("androidx.camera:camera-camera2:${cameraxVersion}")
@@ -53,11 +69,10 @@ dependencies {
     implementation("androidx.camera:camera-view:${cameraxVersion}")
     implementation("androidx.camera:camera-extensions:${cameraxVersion}")
 
-    // RTMP Streaming dependencies
-    val rootEncoderVersion = "2.4.5"
-    implementation("com.github.pedroSG94.RootEncoder:library:${rootEncoderVersion}")
+    // RTMP Streaming
+    implementation("com.github.pedroSG94.RootEncoder:library:2.4.5")
 
-    // ExoPlayer for remote viewing
+    // ExoPlayer (Media3)
     val media3Version = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:${media3Version}")
     implementation("androidx.media3:media3-exoplayer-rtsp:${media3Version}")

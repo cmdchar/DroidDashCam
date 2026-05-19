@@ -1,9 +1,12 @@
-package com.helge.droiddashcam
+package com.helge.droiddashcam.ui
 
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.annotation.OptIn
-import androidx.appcompat.app.AppCompatActivity
+import androidx.fragment.app.Fragment
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -11,24 +14,27 @@ import androidx.media3.datasource.rtmp.RtmpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.helge.droiddashcam.databinding.ActivityViewerBinding
+import com.helge.droiddashcam.databinding.FragmentViewerBinding
 
-class ViewerActivity : AppCompatActivity() {
-    private var _viewBinding: ActivityViewerBinding? = null
-    private val viewBinding get() = _viewBinding!!
+class ViewerFragment : Fragment() {
+    private var _binding: FragmentViewerBinding? = null
+    private val binding get() = _binding!!
     private var player: ExoPlayer? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        _viewBinding = ActivityViewerBinding.inflate(layoutInflater)
-        setContentView(viewBinding.root)
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+        _binding = FragmentViewerBinding.inflate(inflater, container, false)
+        return binding.root
+    }
 
-        viewBinding.playButton.setOnClickListener {
-            val url = viewBinding.rtspUrlInput.text.toString()
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        binding.playButton.setOnClickListener {
+            val url = binding.rtspUrlInput.text.toString()
             if (url.isNotEmpty()) {
                 startPlaying(url)
             } else {
-                Toast.makeText(this, "Please enter stream URL", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Please enter stream URL", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -36,24 +42,24 @@ class ViewerActivity : AppCompatActivity() {
     @OptIn(UnstableApi::class)
     private fun startPlaying(url: String) {
         player?.release()
-        val exoPlayer = ExoPlayer.Builder(this).build()
+        val exoPlayer = ExoPlayer.Builder(requireContext()).build()
         player = exoPlayer
-        viewBinding.videoView.player = exoPlayer
+        binding.videoView.player = exoPlayer
 
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 val status = when(state) {
                     Player.STATE_IDLE -> "Status: Idle"
                     Player.STATE_BUFFERING -> "Status: Buffering..."
-                    Player.STATE_READY -> "Status: Playing (PIP Mixed Stream)"
+                    Player.STATE_READY -> "Status: Live"
                     Player.STATE_ENDED -> "Status: Ended"
                     else -> "Status: Unknown"
                 }
-                viewBinding.connectionStatus.text = status
+                binding.connectionStatus.text = status
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                viewBinding.connectionStatus.text = "Status: Error - ${error.message}"
+                binding.connectionStatus.text = "Status: Error - ${error.message}"
             }
         })
 
@@ -64,7 +70,7 @@ class ViewerActivity : AppCompatActivity() {
             ProgressiveMediaSource.Factory(RtmpDataSource.Factory())
                 .createMediaSource(mediaItem)
         } else {
-            ProgressiveMediaSource.Factory(androidx.media3.datasource.DefaultDataSource.Factory(this))
+            ProgressiveMediaSource.Factory(androidx.media3.datasource.DefaultDataSource.Factory(requireContext()))
                 .createMediaSource(mediaItem)
         }
 
@@ -79,10 +85,10 @@ class ViewerActivity : AppCompatActivity() {
         player = null
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun onDestroyView() {
+        super.onDestroyView()
         player?.release()
         player = null
-        _viewBinding = null
+        _binding = null
     }
 }
