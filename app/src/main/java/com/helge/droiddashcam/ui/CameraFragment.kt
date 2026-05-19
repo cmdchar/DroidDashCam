@@ -33,6 +33,7 @@ import com.helge.droiddashcam.R
 import com.helge.droiddashcam.databinding.FragmentCameraBinding
 import com.pedro.common.ConnectChecker
 import com.pedro.library.rtmp.RtmpStream
+import com.pedro.library.base.recording.RecordController
 import com.pedro.encoder.input.gl.render.filters.`object`.SurfaceFilterRender
 import com.helge.droiddashcam.utils.StorageManager
 import com.helge.droiddashcam.utils.TelemetryRecorder
@@ -46,12 +47,10 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     private var _binding: FragmentCameraBinding? = null
     private val binding get() = _binding!!
 
-    private var videoCapture: VideoCapture<Recorder>? = null
-    private var recording: Recording? = null
-    private lateinit var cameraExecutor: ExecutorService
-
+    // We use RtmpStream as our primary mixer/recorder engine
     private var rtmpStream: RtmpStream? = null
     private var isStreamingActive = false
+    private var isRecordingActive = false
     private var surfaceFilter: SurfaceFilterRender? = null
 
     private val handler = Handler(Looper.getMainLooper())
@@ -60,6 +59,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     private var sensorManager: SensorManager? = null
 
     private var currentVideoUri: android.net.Uri? = null
+    private var currentVideoPath: String? = null
     private var telemetryRecorder: TelemetryRecorder? = null
     private var lastKnownLocation: Location? = null
 
@@ -70,7 +70,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
     private val updateTimerRunnable = object : Runnable {
         override fun run() {
-            if (recording != null) {
+            if (isRecordingActive) {
                 val elapsed = System.currentTimeMillis() - recordingStartTime
                 binding.textRecTime.text = formatElapsedTime(elapsed)
 
@@ -106,17 +106,38 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         super.onViewCreated(view, savedInstanceState)
 
         setupButtons()
-        startCamera()
         startClock()
         setupSensors()
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
+        // Initialize the stream/mixer engine
+        initStreamEngine()
+        startCamera()
 
         try {
             requireContext().registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         } catch (e: Exception) {}
 
         updateStorageText()
+    }
+
+    private fun initStreamEngine() {
+        rtmpStream = RtmpStream(requireContext(), this).apply {
+            // Prepare with high quality
+            prepareVideo(1280, 720, 30, 4000 * 1000, 0, 2)
+            prepareAudio(44100, true, 128 * 1000, false, false)
+
+            val isConcurrent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                requireContext().packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
+            } else false
+
+            if (isConcurrent) {
+                surfaceFilter = SurfaceFilterRender().apply {
+                    setScale(30f, 30f)
+                    setPosition(70f, 70f)
+                }
+                getGlInterface().setFilter(surfaceFilter!!)
+            }
+        }
     }
 
     private fun setupButtons() {
@@ -150,42 +171,23 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     }
 
     private fun startStreaming(url: String) {
-        rtmpStream = RtmpStream(requireContext(), this).apply {
-            if (prepareVideo(1280, 720, 30, 2000 * 1000, 0, 2) &&
-                prepareAudio(44100, true, 128 * 1000, false, false)) {
-
-                val isConcurrent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    requireContext().packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
-                } else false
-
-                if (isConcurrent) {
-                    surfaceFilter = SurfaceFilterRender().apply {
-                        setScale(30f, 30f)
-                        setPosition(70f, 70f)
-                    }
-                    getGlInterface().setFilter(surfaceFilter!!)
-                }
-
-                startStream(url)
+        rtmpStream?.let { stream ->
+            if (!stream.isStreaming) {
+                stream.startStream(url)
                 isStreamingActive = true
                 Toast.makeText(context, "Streaming Started", Toast.LENGTH_SHORT).show()
-                startCamera()
             }
         }
     }
 
     private fun stopStreaming() {
         rtmpStream?.stopStream()
-        rtmpStream?.release()
-        rtmpStream = null
-        surfaceFilter = null
         isStreamingActive = false
         Toast.makeText(context, "Streaming Stopped", Toast.LENGTH_SHORT).show()
-        startCamera()
     }
 
     private fun toggleRecording() {
-        if (recording != null) {
+        if (isRecordingActive) {
             stopRecording()
             showDriveSummary()
         } else {
@@ -201,69 +203,97 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     }
 
     private fun startRecording() {
-        val videoCapture = this.videoCapture ?: return
+        val stream = rtmpStream ?: return
 
         binding.recLayout.visibility = View.VISIBLE
         startRecAnimation()
         StorageManager.cleanupOldFiles(requireContext())
 
         val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroidDashCam")
-            }
-        }
+        val videoName = "$name.mp4"
 
-        val mediaStoreOutputOptions = MediaStoreOutputOptions
-            .Builder(requireContext().contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-            .setContentValues(contentValues)
-            .build()
+        // We need a file path for RootEncoder to record to
+        // On modern Android we'll record to a temporary internal file then move to MediaStore
+        val tempFile = File(requireContext().cacheDir, videoName)
+        currentVideoPath = tempFile.absolutePath
 
-        recording = videoCapture.output
-            .prepareRecording(requireContext(), mediaStoreOutputOptions)
-            .apply { if (PermissionChecker.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) == PermissionChecker.PERMISSION_GRANTED) withAudioEnabled() }
-            .start(ContextCompat.getMainExecutor(requireContext())) { recordEvent ->
-                if (recordEvent is VideoRecordEvent.Start) {
-                    recordingStartTime = System.currentTimeMillis()
-                    // Initialize telemetry recording with the planned name
-                    // MediaStore usually adds .mp4 extension
-                    telemetryRecorder = TelemetryRecorder(requireContext(), "$name.mp4")
-                    handler.post(updateTimerRunnable)
-                } else if (recordEvent is VideoRecordEvent.Finalize) {
-                    val uri = recordEvent.outputResults.outputUri
-                    currentVideoUri = uri
-
-                    if (recordEvent.hasError()) {
-                        Log.e("CameraFragment", "Recording error: ${recordEvent.error}")
-                        telemetryRecorder = null
-                    } else {
-                        // Sync telemetry filename if MediaStore changed it
-                        val actualName = getDisplayNameFromUri(uri)
-                        if (actualName != null && actualName != "$name.mp4") {
-                            // Rare case where name collided and MediaStore renamed it
-                            renameTelemetryFile("$name.mp4", actualName)
-                        }
-                        telemetryRecorder?.save()
-                        telemetryRecorder = null
-                    }
+        try {
+            stream.startRecord(tempFile.absolutePath, object : RecordController.Listener {
+                override fun onStatusChange(status: RecordController.Status) {
+                    Log.d("CameraFragment", "Record status: $status")
                 }
-            }
+            })
+            isRecordingActive = true
+            recordingStartTime = System.currentTimeMillis()
+            telemetryRecorder = TelemetryRecorder(requireContext(), videoName)
+            handler.post(updateTimerRunnable)
+        } catch (e: Exception) {
+            Log.e("CameraFragment", "Failed to start recording", e)
+            Toast.makeText(context, "Recording failed", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun restartRecording() {
-        recording?.stop()
+        stopRecording()
         startRecording()
     }
 
     private fun stopRecording() {
-        recording?.stop()
-        recording = null
+        if (!isRecordingActive) return
+
+        rtmpStream?.stopRecord()
+        isRecordingActive = false
         binding.recLayout.visibility = View.GONE
         binding.recDot.clearAnimation()
         handler.removeCallbacks(updateTimerRunnable)
+
+        telemetryRecorder?.save()
+        telemetryRecorder = null
+
+        // Move recorded file to MediaStore
+        currentVideoPath?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                val uri = moveFileToMediaStore(file)
+                currentVideoUri = uri
+            }
+        }
+
         updateStorageText()
+    }
+
+    private fun moveFileToMediaStore(file: File): android.net.Uri? {
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroidDashCam")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+        }
+
+        val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        val uri = requireContext().contentResolver.insert(collection, values)
+
+        uri?.let { targetUri ->
+            try {
+                requireContext().contentResolver.openOutputStream(targetUri)?.use { out ->
+                    file.inputStream().use { input ->
+                        input.copyTo(out)
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear()
+                    values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                    requireContext().contentResolver.update(targetUri, values, null, null)
+                }
+                file.delete()
+                return targetUri
+            } catch (e: Exception) {
+                Log.e("CameraFragment", "Error moving file to MediaStore", e)
+            }
+        }
+        return null
     }
 
     private fun showDriveSummary() {
@@ -273,19 +303,6 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             .setMessage("Duration: $duration min\nMax Speed: ${(maxSpeed * 3.6).toInt()} km/h\nIncidents detected: $incidentCount")
             .setPositiveButton("OK", null)
             .show()
-    }
-
-    private fun renameTelemetryFile(oldName: String, newName: String) {
-        try {
-            val dir = requireContext().getExternalFilesDir("telemetry")
-            val oldFile = File(dir, "$oldName.json")
-            val newFile = File(dir, "$newName.json")
-            if (oldFile.exists()) {
-                oldFile.renameTo(newFile)
-            }
-        } catch (e: Exception) {
-            Log.e("CameraFragment", "Error renaming telemetry file", e)
-        }
     }
 
     private fun getDisplayNameFromUri(uri: android.net.Uri): String? {
@@ -357,7 +374,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             val threshold = 31.0 - (sensitivity * 2.0)
 
             if (acceleration > threshold) {
-                if (recording != null) {
+                if (isRecordingActive) {
                     incidentCount++
                     lockCurrentClip()
                     // Visual feedback for incident
@@ -422,43 +439,34 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         val backCameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
         val frontCameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
 
+        // Back preview for user display
         val backPreview = Preview.Builder().build().also {
             it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
         }
 
-        val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
-        videoCapture = VideoCapture.withOutput(recorder)
-
-        val frontPreview = Preview.Builder().build().also {
-            it.setSurfaceProvider(binding.viewFinderSecondary.surfaceProvider)
+        // Mixer surface for rtmpStream
+        val streamPreviewBack = Preview.Builder().build()
+        streamPreviewBack.setSurfaceProvider { request ->
+            request.provideSurface(rtmpStream!!.getGlInterface().surface, ContextCompat.getMainExecutor(requireContext())) {}
         }
-        binding.viewFinderSecondary.visibility = View.VISIBLE
 
-        val backGroupBuilder = UseCaseGroup.Builder()
+        // Front preview for mixer (surface filter)
+        val streamPreviewFront = Preview.Builder().build()
+        streamPreviewFront.setSurfaceProvider { request ->
+            request.provideSurface(surfaceFilter!!.surface, ContextCompat.getMainExecutor(requireContext())) {}
+        }
+
+        val backGroup = UseCaseGroup.Builder()
             .addUseCase(backPreview)
-            .addUseCase(videoCapture!!)
+            .addUseCase(streamPreviewBack)
+            .build()
 
-        val frontGroupBuilder = UseCaseGroup.Builder()
-            .addUseCase(frontPreview)
+        val frontGroup = UseCaseGroup.Builder()
+            .addUseCase(streamPreviewFront)
+            .build()
 
-        rtmpStream?.let { stream ->
-            val streamPreviewBack = Preview.Builder().build()
-            streamPreviewBack.setSurfaceProvider { request ->
-                request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(requireContext())) {}
-            }
-            backGroupBuilder.addUseCase(streamPreviewBack)
-
-            surfaceFilter?.let { filter ->
-                val streamPreviewFront = Preview.Builder().build()
-                streamPreviewFront.setSurfaceProvider { request ->
-                    request.provideSurface(filter.surface, ContextCompat.getMainExecutor(requireContext())) {}
-                }
-                frontGroupBuilder.addUseCase(streamPreviewFront)
-            }
-        }
-
-        val backConfig = ConcurrentCamera.SingleCameraConfig(backCameraSelector, backGroupBuilder.build(), viewLifecycleOwner)
-        val frontConfig = ConcurrentCamera.SingleCameraConfig(frontCameraSelector, frontGroupBuilder.build(), viewLifecycleOwner)
+        val backConfig = ConcurrentCamera.SingleCameraConfig(backCameraSelector, backGroup, viewLifecycleOwner)
+        val frontConfig = ConcurrentCamera.SingleCameraConfig(frontCameraSelector, frontGroup, viewLifecycleOwner)
 
         try {
             cameraProvider.unbindAll()
@@ -472,20 +480,15 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         val preview = Preview.Builder().build().also {
             it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
         }
-        val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
-        videoCapture = VideoCapture.withOutput(recorder)
+
+        val streamPreview = Preview.Builder().build()
+        streamPreview.setSurfaceProvider { request ->
+            request.provideSurface(rtmpStream!!.getGlInterface().surface, ContextCompat.getMainExecutor(requireContext())) {}
+        }
 
         val groupBuilder = UseCaseGroup.Builder()
             .addUseCase(preview)
-            .addUseCase(videoCapture!!)
-
-        rtmpStream?.let { stream ->
-            val streamPreview = Preview.Builder().build()
-            streamPreview.setSurfaceProvider { request ->
-                request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(requireContext())) {}
-            }
-            groupBuilder.addUseCase(streamPreview)
-        }
+            .addUseCase(streamPreview)
 
         try {
             cameraProvider.unbindAll()
@@ -529,6 +532,5 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         sensorManager?.unregisterListener(this)
         rtmpStream?.release()
         _binding = null
-        cameraExecutor.shutdown()
     }
 }
