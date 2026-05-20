@@ -1,9 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Professional Dark Theme -->
     <style name="Theme.DroidDashCam" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="colorPrimary">@color/primary</item>
-        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="colorPrimary">@color/pro_blue</item>
+        <item name="colorOnPrimary">@color/black</item>
         <item name="colorSecondary">@color/secondary</item>
+        <item name="colorTertiary">@color/pro_orange</item>
         <item name="android:statusBarColor">@color/black</item>
         <item name="android:navigationBarColor">@color/black</item>
         <item name="android:windowBackground">@color/black</item>

@@ -75,17 +75,34 @@ class GalleryFragment : Fragment() {
         if (videoList.isEmpty()) {
             binding.textEmpty.visibility = View.VISIBLE
         } else {
-            binding.recyclerView.adapter = VideoAdapter(videoList) { video ->
+            binding.recyclerView.adapter = VideoAdapter(videoList, { video ->
                 val action = GalleryFragmentDirections.actionGalleryToReview(video.uri)
                 findNavController().navigate(action)
+            }, { video ->
+                openExternalPlayer(video.uri)
+            })
+        }
+    }
+
+    private fun openExternalPlayer(uriString: String) {
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(android.net.Uri.parse(uriString), "video/*")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+            startActivity(android.content.Intent.createChooser(intent, "Open with..."))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "No app to open video", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
     data class VideoItem(val uri: String, val name: String, val timestamp: Long, val size: Long)
 
-    inner class VideoAdapter(private val videos: List<VideoItem>, private val onClick: (VideoItem) -> Unit) :
-        androidx.recyclerview.widget.RecyclerView.Adapter<VideoAdapter.ViewHolder>() {
+    inner class VideoAdapter(
+        private val videos: List<VideoItem>,
+        private val onClick: (VideoItem) -> Unit,
+        private val onLongClick: (VideoItem) -> Unit
+    ) : androidx.recyclerview.widget.RecyclerView.Adapter<VideoAdapter.ViewHolder>() {
 
         inner class ViewHolder(val itemBinding: ItemVideoBinding) : androidx.recyclerview.widget.RecyclerView.ViewHolder(itemBinding.root)
 
@@ -106,6 +123,10 @@ class GalleryFragment : Fragment() {
                 .into(holder.itemBinding.imgThumbnail)
 
             holder.itemView.setOnClickListener { onClick(video) }
+            holder.itemView.setOnLongClickListener {
+                onLongClick(video)
+                true
+            }
         }
 
         override fun getItemCount() = videos.size

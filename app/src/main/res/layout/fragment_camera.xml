@@ -94,23 +94,29 @@
             tools:text="00:12:45" />
     </LinearLayout>
 
-    <!-- Speed Indicator -->
-    <TextView
-        android:id="@+id/text_speed"
+    <!-- Dashboard Gauges -->
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="32dp"
-        android:fontFamily="sans-serif-black"
-        android:textColor="@color/white"
-        android:textSize="48sp"
-        android:shadowColor="@color/black"
-        android:shadowDx="2"
-        android:shadowDy="2"
-        android:shadowRadius="4"
+        android:layout_marginBottom="16dp"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toTopOf="@id/bottom_control_bar"
-        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        tools:text="84 km/h" />
+        app:layout_constraintStart_toStartOf="parent">
+
+        <com.helge.droiddashcam.ui.views.CircularGaugeView
+            android:id="@+id/gauge_speed"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:layout_marginEnd="16dp" />
+
+        <com.helge.droiddashcam.ui.views.CircularGaugeView
+            android:id="@+id/gauge_gforce"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            android:layout_gravity="bottom" />
+
+    </LinearLayout>
 
     <!-- Main Floating Buttons -->
     <ImageButton

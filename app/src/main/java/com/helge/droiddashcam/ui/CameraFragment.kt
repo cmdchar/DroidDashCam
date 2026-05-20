@@ -111,6 +111,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
         // Initialize the stream/mixer engine
         initStreamEngine()
+        setupGauges()
         startCamera()
 
         try {
@@ -118,6 +119,20 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         } catch (e: Exception) {}
 
         updateStorageText()
+    }
+
+    private fun setupGauges() {
+        binding.gaugeSpeed.apply {
+            setMaxValue(240f)
+            setUnit("km/h")
+            setLabel("SPEED")
+        }
+        binding.gaugeGforce.apply {
+            setMaxValue(4f)
+            setUnit("G")
+            setLabel("G-FORCE")
+            setProgressColor(android.graphics.Color.parseColor("#FF6D00")) // Pro Orange
+        }
     }
 
     private fun initStreamEngine() {
@@ -343,8 +358,8 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         val speed = location.speed
         if (speed > maxSpeed) maxSpeed = speed
 
-        val speedKmh = (speed * 3.6).toInt()
-        binding.textSpeed.text = "$speedKmh km/h"
+        val speedKmh = (speed * 3.6f)
+        binding.gaugeSpeed.setValue(speedKmh)
         binding.iconGps.setColorFilter(ContextCompat.getColor(requireContext(), R.color.green_status))
     }
 
@@ -369,6 +384,8 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             val y = event.values[1]
             val z = event.values[2]
             val acceleration = Math.sqrt((x * x + y * y + z * z).toDouble())
+            val gForce = (acceleration / 9.81).toFloat()
+            binding.gaugeGforce.setValue(gForce)
 
             val sensitivity = prefs.getInt("g_sensor_sensitivity", 5)
             val threshold = 31.0 - (sensitivity * 2.0)
