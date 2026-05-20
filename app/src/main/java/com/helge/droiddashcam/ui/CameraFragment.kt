@@ -3,6 +3,7 @@ package com.helge.droiddashcam.ui
 import android.Manifest
 import android.content.*
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -68,6 +69,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     private var incidentCount = 0
     private var driveStartTime = 0L
     private var isFrontMain = false
+    private var isLockedCurrent = false
 
     private val updateTimerRunnable = object : Runnable {
         override fun run() {
@@ -245,6 +247,9 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     private fun startRecording() {
         val stream = rtmpStream ?: return
 
+        isLockedCurrent = false
+        binding.btnLock.clearColorFilter()
+
         binding.recLayout.visibility = View.VISIBLE
         startRecAnimation()
         StorageManager.cleanupOldFiles(requireContext())
@@ -296,6 +301,10 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             if (file.exists()) {
                 val uri = moveFileToMediaStore(file)
                 currentVideoUri = uri
+                if (isLockedCurrent && uri != null) {
+                    StorageManager.lockFile(requireContext(), uri)
+                    isLockedCurrent = false
+                }
             }
         }
 
@@ -357,7 +366,9 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
     }
 
     private fun updateStorageText() {
-        Log.d("CameraFragment", StorageManager.getAvailableSpaceText())
+        val storageText = StorageManager.getAvailableSpaceText()
+        binding.textStorage.text = storageText
+        Log.d("CameraFragment", storageText)
     }
 
     private fun setupSensors() {
@@ -453,43 +464,81 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
     private fun takePhoto() {
         val stream = rtmpStream ?: return
-        val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val photoName = "IMG_$name.jpg"
-        val tempFile = File(requireContext().cacheDir, photoName)
+        stream.getGlInterface().takePhoto { bitmap ->
+            saveBitmapToMediaStore(bitmap)
+        }
+    }
 
-        // RootEncoder doesn't have a direct takePhoto for the mixed feed easily accessible
-        // in this version, but we can simulate it by recording a 1-second clip or
-        // using the GlInterface to get a bitmap.
-        // For simplicity in this Pro version, we'll use a Toast to acknowledge the intent
-        // and ideally implement BitMap capture from the GLSurface.
-        Toast.makeText(context, "Photo Saved to Gallery", Toast.LENGTH_SHORT).show()
+    private fun saveBitmapToMediaStore(bitmap: Bitmap) {
+        val name = "IMG_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DroidDashCam")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val uri = requireContext().contentResolver.insert(collection, values)
+
+        uri?.let { targetUri ->
+            try {
+                requireContext().contentResolver.openOutputStream(targetUri)?.use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear()
+                    values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                    requireContext().contentResolver.update(targetUri, values, null, null)
+                }
+                activity?.runOnUiThread {
+                    Toast.makeText(context, "Photo Saved: $name", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("CameraFragment", "Error saving photo", e)
+                activity?.runOnUiThread {
+                    Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun switchCameras() {
         surfaceFilter?.let { filter ->
             isFrontMain = !isFrontMain
             if (isFrontMain) {
-                // Front is main (full screen), Back is PiP
-                // This requires a more complex filter setup or swapping sources
-                // For now, let's just toggle the PiP position/size to show it's working
+                // Front becomes main (scaled to cover), Back is hidden behind or reduced
+                // In RootEncoder, surfaceFilter is applied to the front camera in bindConcurrentCamera
+                // To swap effectively, we'd need to swap the surfaces passed to the previews.
+                // For this implementation, we swap the PiP role:
                 filter.setScale(100f, 100f)
                 filter.setPosition(0f, 0f)
-                Toast.makeText(context, "Front Camera Focus", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, getString(R.string.front_camera_main), Toast.LENGTH_SHORT).show()
             } else {
-                // Back is main, Front is PiP
+                // Front is PiP (default)
                 filter.setScale(30f, 30f)
                 filter.setPosition(70f, 70f)
-                Toast.makeText(context, "Dual View Reset", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, getString(R.string.back_camera_main), Toast.LENGTH_SHORT).show()
             }
+        } ?: run {
+            Toast.makeText(context, "Dual camera not active", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun lockCurrentClip() {
-        currentVideoUri?.let { uri ->
-            StorageManager.lockFile(requireContext(), uri)
-            Toast.makeText(context, "Clip Protected", Toast.LENGTH_SHORT).show()
-        } ?: run {
-            Toast.makeText(context, "No active recording to lock", Toast.LENGTH_SHORT).show()
+        if (isRecordingActive) {
+            isLockedCurrent = true
+            binding.btnLock.setColorFilter(ContextCompat.getColor(requireContext(), R.color.red_rec))
+            Toast.makeText(context, "Current Clip Locked", Toast.LENGTH_SHORT).show()
+        } else {
+            currentVideoUri?.let { uri ->
+                StorageManager.lockFile(requireContext(), uri)
+                Toast.makeText(context, "Last Clip Protected", Toast.LENGTH_SHORT).show()
+            } ?: run {
+                Toast.makeText(context, "No recording to lock", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

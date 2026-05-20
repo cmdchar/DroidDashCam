@@ -48,13 +48,12 @@ object StorageManager {
             }
         }
 
-        // Simple cleanup logic: if we have more than 10 clips or we want to be more aggressive
-        // In a real app, we would check actual disk space using StatFs
-        val moviesDir = File(context.getExternalFilesDir(null), "../../..") // Rough estimate
-        val totalSpace = moviesDir.totalSpace
-        val usableSpace = moviesDir.usableSpace
+        // Check actual disk space on primary external storage
+        val storageDir = android.os.Environment.getExternalStorageDirectory()
+        val totalSpace = storageDir.totalSpace
+        val usableSpace = storageDir.usableSpace
 
-        if (usableSpace < totalSpace * (1 - MAX_STORAGE_USAGE_PERCENT)) {
+        if (totalSpace > 0 && usableSpace < totalSpace * (1 - MAX_STORAGE_USAGE_PERCENT)) {
             // Delete oldest until we have enough space
             var freed = 0L
             for (video in videoList) {

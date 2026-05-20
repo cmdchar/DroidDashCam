@@ -49,6 +49,14 @@
             app:tint="@color/yellow_status" />
 
         <ImageView
+            android:id="@+id/icon_mic"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_mic"
+            app:tint="@color/white" />
+
+        <ImageView
             android:id="@+id/icon_battery"
             android:layout_width="16dp"
             android:layout_height="16dp"
@@ -61,6 +69,14 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             tools:text="35°C" />
+
+        <TextView
+            android:id="@+id/text_storage"
+            style="@style/StatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            tools:text="45 GB" />
 
     </LinearLayout>
 
