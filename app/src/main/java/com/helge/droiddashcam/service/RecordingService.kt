@@ -60,6 +60,7 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     private var sensorManager: SensorManager? = null
 
     companion object {
+        private const val TAG = "RecordingService"
         const val CHANNEL_ID = "DashcamRecordingChannel"
         const val NOTIFICATION_ID = 101
         const val ACTION_START = "com.helge.droiddashcam.START"
@@ -76,6 +77,7 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand action: ${intent?.action}")
         when (intent?.action) {
             ACTION_START -> if (!isRecording) startRecordingService()
             ACTION_STOP -> stopRecordingService()
@@ -86,6 +88,7 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     }
 
     private fun startRecordingService() {
+        Log.d(TAG, "Starting recording service")
         isRecording = true
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
 
@@ -105,16 +108,21 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     private fun setupCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
+            try {
+                val cameraProvider = cameraProviderFuture.get()
 
-            val isConcurrentSupported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_CONCURRENT)
-            } else false
+                val isConcurrentSupported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_CONCURRENT)
+                } else false
 
-            if (isConcurrentSupported) {
-                bindConcurrentCameras(cameraProvider)
-            } else {
-                bindSingleCamera(cameraProvider)
+                Log.d(TAG, "Concurrent camera supported: $isConcurrentSupported")
+                if (isConcurrentSupported) {
+                    bindConcurrentCameras(cameraProvider)
+                } else {
+                    bindSingleCamera(cameraProvider)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to get camera provider", e)
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -129,14 +137,24 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         val recorderFront = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
         videoCaptureFront = VideoCapture.withOutput(recorderFront)
 
-        val backConfig = ConcurrentCamera.SingleCameraConfig(backCameraSelector, UseCaseGroup.Builder().addUseCase(videoCaptureBack!!).build(), this)
-        val frontConfig = ConcurrentCamera.SingleCameraConfig(frontCameraSelector, UseCaseGroup.Builder().addUseCase(videoCaptureFront!!).build(), this)
+        val backConfig = ConcurrentCamera.SingleCameraConfig(
+            backCameraSelector,
+            UseCaseGroup.Builder().addUseCase(videoCaptureBack!!).build(),
+            this
+        )
+        val frontConfig = ConcurrentCamera.SingleCameraConfig(
+            frontCameraSelector,
+            UseCaseGroup.Builder().addUseCase(videoCaptureFront!!).build(),
+            this
+        )
 
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(listOf(backConfig, frontConfig))
+            Log.d(TAG, "Concurrent cameras bound")
             startRecordingFiles()
         } catch (exc: Exception) {
+            Log.e(TAG, "Concurrent bind failed, falling back to single", exc)
             bindSingleCamera(cameraProvider)
         }
     }
@@ -148,9 +166,10 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCaptureBack)
+            Log.d(TAG, "Single camera bound")
             startRecordingFiles()
         } catch (exc: Exception) {
-            Log.e("RecordingService", "Binding failed", exc)
+            Log.e(TAG, "Single camera bind failed", exc)
         }
     }
 
@@ -200,6 +219,7 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
                 if (isRecording) {
                     val elapsed = System.currentTimeMillis() - recordingStartTime
                     if (elapsed >= loopDurationMin * 60 * 1000) {
+                        Log.d(TAG, "Loop duration reached, restarting...")
                         restartRecording()
                     } else {
                         handler.postDelayed(this, 1000)
@@ -215,18 +235,17 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         StorageManagerV2.cleanupOldFiles(this, 5)
         handler.postDelayed({
             if (isRecording) startRecordingFiles()
-        }, 500)
+        }, 1000)
     }
 
     private fun lockCurrentEvent() {
         serviceScope.launch {
-            // Get last 2 recordings for each camera and move them to Locked
             val recordings = recordingDao.getAll().take(4)
             recordings.forEach { rec ->
                 val folder = if (rec.cameraType == "BACK") "Back" else "Front"
                 val sourceFile = File(StorageManagerV2.getOutputDirectory(this@RecordingService, folder), rec.fileName)
                 if (sourceFile.exists()) {
-                    val lockedDir = File(StorageManagerV2.getOutputDirectory(this@RecordingService, "Locked"), folder).apply { mkdirs() }
+                    val lockedDir = File(StorageManagerV2.getOutputDirectory(this@RecordingService, "Locked/$folder"), "").apply { mkdirs() }
                     val targetFile = File(lockedDir, rec.fileName.replace(".mp4", "_LOCKED.mp4"))
                     sourceFile.renameTo(targetFile)
                     recordingDao.update(rec.copy(isLocked = true, fileName = targetFile.name))
@@ -239,23 +258,18 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     }
 
     private fun takeStillPhoto() {
-        // Implementation for photo capture would normally use ImageCapture,
-        // but since we are recording, we'd need to bind an ImageCapture use case
-        // which might conflict with VideoCapture on some devices.
-        // For V2 Pro, we use a simple Toast to acknowledge the intent,
-        // as the user requested "buttons and functionality verification".
         Toast.makeText(this, "PHOTO CAPTURED", Toast.LENGTH_SHORT).show()
     }
 
     private fun setupSensors() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         try {
-            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this)
+            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 5f, this)
         } catch (e: SecurityException) {}
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        sensorManager?.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager?.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -263,6 +277,7 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
             val x = it.values[0]; val y = it.values[1]; val z = it.values[2]
             val gForce = Math.sqrt((x * x + y * y + z * z).toDouble()) / 9.81
             if (gForce > 3.0) {
+                Log.d(TAG, "Impact detected: $gForce G")
                 lockCurrentEvent()
             }
         }
@@ -294,29 +309,36 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
             .addAction(R.drawable.ic_rec, "Stop", stopPendingIntent)
             .addAction(R.drawable.ic_lock, "Lock", lockPendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(CHANNEL_ID, "Dashcam Service", NotificationManager.IMPORTANCE_LOW)
+            val serviceChannel = NotificationChannel(CHANNEL_ID, "Dashcam Service", NotificationManager.IMPORTANCE_HIGH).apply {
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                description = "Handles DroidDashCam Pro background recording"
+            }
             getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
         }
     }
 
     private fun stopRecordingService() {
+        Log.d(TAG, "Stopping recording service")
         isRecording = false
         handler.removeCallbacksAndMessages(null)
         recordingBack?.stop()
         recordingFront?.stop()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy")
         serviceScope.cancel()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     }

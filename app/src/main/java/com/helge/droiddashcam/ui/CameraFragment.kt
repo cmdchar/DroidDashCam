@@ -14,6 +14,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
 import com.helge.droiddashcam.R
 import com.helge.droiddashcam.data.db.RecordingDao
@@ -64,6 +65,12 @@ class CameraFragment : Fragment() {
     }
 
     private fun setupButtons() {
+        binding.btnGallery.setOnClickListener {
+            findNavController().navigate(R.id.action_camera_to_gallery)
+        }
+        binding.btnSettings.setOnClickListener {
+            findNavController().navigate(R.id.action_camera_to_settings)
+        }
         binding.btnRec.setOnClickListener { toggleRecording() }
 
         binding.btnLock.setOnClickListener {

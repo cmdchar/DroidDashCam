@@ -12,53 +12,51 @@ object StorageManagerV2 {
     private const val TAG = "StorageManagerV2"
 
     fun getOutputDirectory(context: Context, subDir: String): File {
-        val mediaDir = context.externalMediaDirs.firstOrNull()?.let {
-            File(it, "Dashcam/$subDir").apply { mkdirs() }
+        // We use public Movies directory for better visibility in Gallery
+        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val dashcamDir = File(moviesDir, "DroidDashCam/$subDir")
+        if (!dashcamDir.exists()) {
+            dashcamDir.mkdirs()
         }
-        return if (mediaDir != null && mediaDir.exists()) mediaDir else context.filesDir
+        return dashcamDir
     }
 
     fun getAvailableSpaceText(context: Context): String {
-        val path = context.getExternalFilesDir(null) ?: return "0 GB"
+        val path = Environment.getExternalStorageDirectory()
         val stat = android.os.StatFs(path.path)
         val availableBytes = stat.availableBlocksLong * stat.blockSizeLong
         val gbAvailable = availableBytes / 1024 / 1024 / 1024
-        return "$gbAvailable GB"
+        return "$gbAvailable GB Free"
     }
 
     fun cleanupOldFiles(context: Context, minFreeGB: Int) {
-        val storageDir = context.getExternalFilesDir(null) ?: return
-        val totalSpace = storageDir.totalSpace
-        val usableSpace = storageDir.usableSpace
+        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val dashcamRoot = File(moviesDir, "DroidDashCam")
+        if (!dashcamRoot.exists()) return
+
+        val stat = android.os.StatFs(Environment.getExternalStorageDirectory().path)
+        val usableSpace = stat.availableBlocksLong * stat.blockSizeLong
         val minFreeBytes = minFreeGB.toLong() * 1024 * 1024 * 1024
 
         if (usableSpace < minFreeBytes) {
-            val resolver = context.contentResolver
-            val projection = arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.SIZE)
-            val selection = "${MediaStore.Video.Media.DISPLAY_NAME} NOT LIKE ?"
-            val selectionArgs = arrayOf("%LOCKED%")
-            val sortOrder = "${MediaStore.Video.Media.DATE_MODIFIED} ASC"
+            // Collect all non-locked mp4 files across subfolders
+            val files = mutableListOf<File>()
+            dashcamRoot.walkTopDown().forEach { file ->
+                if (file.isFile && file.extension == "mp4" && !file.name.contains("_LOCKED")) {
+                    files.add(file)
+                }
+            }
 
-            resolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                sortOrder
-            )?.use { cursor ->
-                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-                var currentUsable = usableSpace
-                while (cursor.moveToNext() && currentUsable < minFreeBytes) {
-                    val id = cursor.getLong(idColumn)
-                    val size = cursor.getLong(sizeColumn)
-                    val uri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
-                    try {
-                        resolver.delete(uri, null, null)
-                        currentUsable += size
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to delete old file", e)
-                    }
+            // Sort by oldest
+            files.sortBy { it.lastModified() }
+
+            var currentUsable = usableSpace
+            for (file in files) {
+                if (currentUsable >= minFreeBytes) break
+                val size = file.length()
+                if (file.delete()) {
+                    currentUsable += size
+                    Log.d(TAG, "Deleted old file: ${file.name}")
                 }
             }
         }
