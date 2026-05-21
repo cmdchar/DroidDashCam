@@ -24,6 +24,16 @@
             app:title="Clip Duration (Minutes)" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="Security">
+        <EditTextPreference
+            app:defaultValue="0000"
+            app:key="ui_pin"
+            app:title="UI Lock PIN"
+            app:summary="PIN required to unlock the dashcam interface"
+            android:inputType="numberPassword"
+            android:maxLength="4" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="Safety and Sensors">
         <SwitchPreferenceCompat
             app:defaultValue="true"
@@ -57,6 +67,12 @@
             app:key="bluetooth_autostart"
             app:title="Bluetooth Auto-Start"
             app:summary="Start recording when connected to car Bluetooth" />
+
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:key="charger_autostart"
+            app:title="Charger Auto-Start"
+            app:summary="Start recording when connected to power" />
     </PreferenceCategory>
 
 </PreferenceScreen>
