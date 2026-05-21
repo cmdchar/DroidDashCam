@@ -30,6 +30,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -70,7 +75,7 @@ dependencies {
     implementation("androidx.camera:camera-extensions:${cameraxVersion}")
 
     // RTMP Streaming
-    implementation("com.github.pedroSG94.RootEncoder:library:2.4.5")
+    implementation("com.github.pedroSG94.RootEncoder:library:2.4.8")
 
     // ExoPlayer (Media3)
     val media3Version = "1.4.1"

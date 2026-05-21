@@ -22,8 +22,13 @@ object StorageManager {
         )
 
         // Query videos in our app's directory, excluding locked ones
-        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} NOT LIKE ?"
-        val selectionArgs = arrayOf("Movies/DroidDashCam%", "%LOCKED%")
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} NOT LIKE ?"
+        } else {
+            "${MediaStore.Video.Media.DATA} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} NOT LIKE ?"
+        }
+
+        val selectionArgs = arrayOf("%DroidDashCam%", "%LOCKED%")
         val sortOrder = "${MediaStore.Video.Media.DATE_MODIFIED} ASC"
 
         val videoList = mutableListOf<Pair<android.net.Uri, Long>>()
@@ -48,8 +53,8 @@ object StorageManager {
             }
         }
 
-        // Check actual disk space on primary external storage
-        val storageDir = android.os.Environment.getExternalStorageDirectory()
+        // Check actual disk space on the volume where we save movies
+        val storageDir = context.getExternalFilesDir(null) ?: return
         val totalSpace = storageDir.totalSpace
         val usableSpace = storageDir.usableSpace
 
@@ -93,9 +98,8 @@ object StorageManager {
         }
     }
 
-    fun getAvailableSpaceText(): String {
-        // This is still a useful utility
-        val path = android.os.Environment.getExternalStorageDirectory()
+    fun getAvailableSpaceText(context: Context?): String {
+        val path = context?.getExternalFilesDir(null) ?: return "0 GB Free"
         val stat = android.os.StatFs(path.path)
         val availableBytes = stat.availableBlocksLong * stat.blockSizeLong
         val gbAvailable = availableBytes / 1024 / 1024 / 1024

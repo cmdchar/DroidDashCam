@@ -6,21 +6,19 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
-    <!-- The mixer preview will be drawn here -->
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- We keep this hidden but used for binding the front camera if needed for preview,
-         though we'll mainly use the mixer surface -->
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinderSecondary"
-        android:layout_width="1dp"
-        android:layout_height="1dp"
-        android:visibility="invisible"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        android:layout_width="120dp"
+        android:layout_height="160dp"
+        android:layout_margin="16dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/top_status_bar"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- Top Status Bar -->
     <LinearLayout
@@ -60,8 +58,16 @@
             android:id="@+id/icon_battery"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:layout_marginEnd="8dp"
+            android:layout_marginEnd="4dp"
             android:src="@drawable/ic_battery" />
+
+        <TextView
+            android:id="@+id/text_battery"
+            style="@style/StatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            tools:text="85%" />
 
         <TextView
             android:id="@+id/text_temp"
@@ -134,7 +140,6 @@
 
     </LinearLayout>
 
-    <!-- Main Floating Buttons -->
     <ImageButton
         android:id="@+id/btn_rec"
         android:layout_width="80dp"
@@ -183,7 +188,6 @@
         app:layout_constraintEnd_toEndOf="@id/btn_photo"
         app:layout_constraintStart_toStartOf="@id/btn_photo" />
 
-    <!-- Bottom Control Bar (Minimal) -->
     <LinearLayout
         android:id="@+id/bottom_control_bar"
         android:layout_width="match_parent"
