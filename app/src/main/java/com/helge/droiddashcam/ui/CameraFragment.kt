@@ -152,9 +152,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
 
     private fun initStreamEngine() {
         rtmpStream = RtmpStream(requireContext(), this).apply {
-            prepareVideo(1280, 720, 30, 4000 * 1000, 0, 2)
-            prepareAudio(44100, true, 128 * 1000, false, false)
-
+            // Setup filters immediately
             watermarkFilter = TextObjectFilterRender().apply {
                 setText("DroidDashCam PRO", 24f, android.graphics.Color.WHITE)
                 setDefaultScale(1280, 720)
@@ -172,6 +170,16 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
                     setPosition(70f, 70f)
                 }
                 getGlInterface().addFilter(surfaceFilter!!)
+            }
+        }
+    }
+
+    private fun prepareStreamEngine() {
+        // Defer video/audio preparation until camera is ready to avoid race conditions with MediaCodec
+        rtmpStream?.let { stream ->
+            if (!stream.isOnPreview) {
+                stream.prepareVideo(1280, 720, 30, 4000 * 1000, 0, 2)
+                stream.prepareAudio(44100, true, 128 * 1000, false, false)
             }
         }
     }
@@ -203,6 +211,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         val streamPreviewBack = Preview.Builder().build().also {
             it.setSurfaceProvider { request ->
                 rtmpStream?.let { stream ->
+                    prepareStreamEngine()
                     request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(requireContext())) {}
                 }
             }
@@ -229,6 +238,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(listOf(backConfig, frontConfig))
         } catch (exc: Exception) {
+            Log.e("CameraFragment", "Concurrent bind failed, falling back", exc)
             bindSingleCamera(cameraProvider)
         }
     }
@@ -240,6 +250,7 @@ class CameraFragment : Fragment(), ConnectChecker, LocationListener, SensorEvent
         val streamPreview = Preview.Builder().build().also {
             it.setSurfaceProvider { request ->
                 rtmpStream?.let { stream ->
+                    prepareStreamEngine()
                     request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(requireContext())) {}
                 }
             }
