@@ -39,7 +39,6 @@ class CameraFragment : Fragment() {
     private var currentPin = "0000"
 
     private val handler = Handler(Looper.getMainLooper())
-    private var sensorManager: android.hardware.SensorManager? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentCameraBinding.inflate(inflater, container, false)
@@ -55,7 +54,6 @@ class CameraFragment : Fragment() {
 
         if (allPermissionsGranted()) {
             startCameraPreview()
-            setupGSensor()
             startClock()
             updateStorageInfo()
         } else {
@@ -69,7 +67,15 @@ class CameraFragment : Fragment() {
         binding.btnRec.setOnClickListener { toggleRecording() }
 
         binding.btnLock.setOnClickListener {
-            binding.lockOverlay.visibility = View.VISIBLE
+            if (isRecording) {
+                sendCommandToService(RecordingService.ACTION_LOCK)
+            } else {
+                binding.lockOverlay.visibility = View.VISIBLE
+            }
+        }
+
+        binding.btnPhoto.setOnClickListener {
+            sendCommandToService(RecordingService.ACTION_PHOTO)
         }
 
         binding.btnUnlock.setOnClickListener {
@@ -81,6 +87,13 @@ class CameraFragment : Fragment() {
                 Toast.makeText(context, "Wrong PIN", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun sendCommandToService(action: String) {
+        val intent = Intent(requireContext(), RecordingService::class.java).apply {
+            this.action = action
+        }
+        requireContext().startService(intent)
     }
 
     private fun startCameraPreview() {
@@ -100,42 +113,16 @@ class CameraFragment : Fragment() {
     }
 
     private fun toggleRecording() {
-        val intent = Intent(requireContext(), RecordingService::class.java)
         if (isRecording) {
-            intent.action = RecordingService.ACTION_STOP
-            requireContext().startService(intent)
+            sendCommandToService(RecordingService.ACTION_STOP)
             isRecording = false
             binding.btnRec.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.red_rec))
             binding.recLayout.visibility = View.GONE
         } else {
-            intent.action = RecordingService.ACTION_START
-            requireContext().startService(intent)
+            sendCommandToService(RecordingService.ACTION_START)
             isRecording = true
             binding.btnRec.setBackgroundColor(ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark))
             binding.recLayout.visibility = View.VISIBLE
-        }
-    }
-
-    private fun setupGSensor() {
-        sensorManager = requireContext().getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
-        val accelerometer = sensorManager?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
-        sensorManager?.registerListener(object : android.hardware.SensorEventListener {
-            override fun onSensorChanged(event: android.hardware.SensorEvent?) {
-                event?.let {
-                    val x = it.values[0]; val y = it.values[1]; val z = it.values[2]
-                    val gForce = Math.sqrt((x * x + y * y + z * z).toDouble()) / 9.81
-                    if (gForce > 2.5) {
-                        lockCurrentRecording()
-                    }
-                }
-            }
-            override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
-        }, accelerometer, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
-    }
-
-    private fun lockCurrentRecording() {
-        if (isRecording) {
-            Toast.makeText(context, "IMPACT DETECTED - LOCKING CLIP", Toast.LENGTH_LONG).show()
         }
     }
 
