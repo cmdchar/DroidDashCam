@@ -19,7 +19,7 @@ import androidx.preference.PreferenceManager
 import com.helge.droiddashcam.R
 import com.helge.droiddashcam.databinding.FragmentCameraBinding
 import com.helge.droiddashcam.service.RecordingService
-import com.helge.droiddashcam.utils.StorageManagerV2
+import com.helge.droiddashcam.utils.StorageManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -43,6 +43,7 @@ class CameraFragment : Fragment() {
             val binder = service as RecordingService.ServiceBinder
             recordingService = binder.getService()
             observeRecordingState()
+            attachPreviews()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             recordingService = null
@@ -60,8 +61,8 @@ class CameraFragment : Fragment() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
         currentPin = prefs.getString("ui_pin", "0000") ?: "0000"
 
+        setupGauges()
         if (allPermissionsGranted()) {
-            startCameraPreview()
             startClock()
             updateStorageInfo()
         } else {
@@ -70,6 +71,11 @@ class CameraFragment : Fragment() {
 
         setupButtons()
         bindRecordingService()
+    }
+
+    private fun setupGauges() {
+        binding.gaugeSpeed.apply { setMaxValue(240f); setUnit("km/h"); setLabel("SPEED") }
+        binding.gaugeGforce.apply { setMaxValue(4f); setUnit("G"); setLabel("G-FORCE"); setProgressColor(android.graphics.Color.parseColor("#FF6D00")) }
     }
 
     private fun bindRecordingService() {
@@ -83,6 +89,28 @@ class CameraFragment : Fragment() {
                 isRecording = recording
                 updateUiState()
             }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            recordingService?.speedKmh?.collectLatest { speed ->
+                binding.gaugeSpeed.setValue(speed)
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            recordingService?.gForce?.collectLatest { g ->
+                binding.gaugeGforce.setValue(g)
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            recordingService?.isConcurrent?.collectLatest { concurrent ->
+                binding.viewFinderSecondary.visibility = if (concurrent) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun attachPreviews() {
+        recordingService?.let { service ->
+            service.backPreview?.setSurfaceProvider(binding.viewFinder.surfaceProvider)
+            service.frontPreview?.setSurfaceProvider(binding.viewFinderSecondary.surfaceProvider)
         }
     }
 
@@ -126,49 +154,6 @@ class CameraFragment : Fragment() {
         requireContext().startService(intent)
     }
 
-    private fun startCameraPreview() {
-        ProcessCameraProvider.getInstance(requireContext()).addListener({
-            try {
-                val provider = ProcessCameraProvider.getInstance(requireContext()).get()
-                val isConcurrent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    requireContext().packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
-                } else false
-
-                provider.unbindAll()
-                if (isConcurrent) {
-                    val backPreview = Preview.Builder().build().also { it.setSurfaceProvider(binding.viewFinder.surfaceProvider) }
-                    val frontPreview = Preview.Builder().build().also { it.setSurfaceProvider(binding.viewFinderSecondary.surfaceProvider) }
-
-                    val backConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_BACK_CAMERA, UseCaseGroup.Builder().addUseCase(backPreview).build(), viewLifecycleOwner)
-                    val frontConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_FRONT_CAMERA, UseCaseGroup.Builder().addUseCase(frontPreview).build(), viewLifecycleOwner)
-
-                    provider.bindToLifecycle(listOf(backConfig, frontConfig))
-                    binding.viewFinderSecondary.visibility = View.VISIBLE
-                } else {
-                    val preview = Preview.Builder().build().also { it.setSurfaceProvider(binding.viewFinder.surfaceProvider) }
-                    provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview)
-                    binding.viewFinderSecondary.visibility = View.GONE
-                }
-            } catch (e: Exception) {
-                Log.e("CameraFragment", "Preview failed", e)
-                // Fallback to single camera if concurrent binding fails
-                startSingleCameraPreview()
-            }
-        }, ContextCompat.getMainExecutor(requireContext()))
-    }
-
-    private fun startSingleCameraPreview() {
-        ProcessCameraProvider.getInstance(requireContext()).addListener({
-            try {
-                val provider = ProcessCameraProvider.getInstance(requireContext()).get()
-                val preview = Preview.Builder().build().also { it.setSurfaceProvider(binding.viewFinder.surfaceProvider) }
-                provider.unbindAll()
-                provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview)
-                binding.viewFinderSecondary.visibility = View.GONE
-            } catch (e: Exception) { Log.e("CameraFragment", "Single preview fallback failed", e) }
-        }, ContextCompat.getMainExecutor(requireContext()))
-    }
-
     private fun toggleRecording() {
         sendCommandToService(if (isRecording) RecordingService.ACTION_STOP else RecordingService.ACTION_START)
     }
@@ -182,7 +167,7 @@ class CameraFragment : Fragment() {
         })
     }
 
-    private fun updateStorageInfo() { binding.textStorage.text = StorageManagerV2.getAvailableSpaceText(requireContext()) }
+    private fun updateStorageInfo() { binding.textStorage.text = StorageManager.getAvailableSpaceText(requireContext()) }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all { ContextCompat.checkSelfPermission(requireContext(), it) == PackageManager.PERMISSION_GRANTED }
 

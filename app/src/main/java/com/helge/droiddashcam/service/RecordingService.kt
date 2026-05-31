@@ -29,7 +29,10 @@ import com.helge.droiddashcam.MainActivity
 import com.helge.droiddashcam.R
 import com.helge.droiddashcam.data.db.RecordingDao
 import com.helge.droiddashcam.data.db.RecordingEntity
-import com.helge.droiddashcam.utils.StorageManagerV2
+import com.helge.droiddashcam.utils.StorageManager
+import com.helge.droiddashcam.utils.TelemetryRecorder
+import com.pedro.library.rtmp.RtmpStream
+import com.pedro.common.ConnectChecker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +43,7 @@ import java.util.concurrent.Executors
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEventListener {
+class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEventListener, ConnectChecker {
 
     private val lifecycleRegistry = LifecycleRegistry(this)
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -51,6 +54,13 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     private var videoCaptureBack: VideoCapture<Recorder>? = null
     private var recordingFront: Recording? = null
     private var recordingBack: Recording? = null
+
+    // Preview use cases for UI
+    var backPreview: Preview? = null
+    var frontPreview: Preview? = null
+
+    private var rtmpStream: RtmpStream? = null
+    private var telemetryRecorder: TelemetryRecorder? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val handler = Handler(Looper.getMainLooper())
@@ -69,6 +79,15 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> get() = _isRecording
 
+    private val _isConcurrent = MutableStateFlow(false)
+    val isConcurrent: StateFlow<Boolean> get() = _isConcurrent
+
+    private val _speedKmh = MutableStateFlow(0f)
+    val speedKmh: StateFlow<Float> get() = _speedKmh
+
+    private val _gForce = MutableStateFlow(0f)
+    val gForce: StateFlow<Float> get() = _gForce
+
     companion object {
         private const val TAG = "RecordingService"
         const val CHANNEL_ID = "DashcamRecordingChannel"
@@ -84,6 +103,14 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         createNotificationChannel()
         setupSensors()
+        initStreamEngine()
+        setupCamera()
+    }
+
+    private fun initStreamEngine() {
+        rtmpStream = RtmpStream(this, this)
+        rtmpStream?.prepareVideo(1280, 720, 30, 4000 * 1024, 0, 2)
+        rtmpStream?.prepareAudio(44100, true, 128 * 1024, false, false)
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -110,53 +137,91 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         loopDurationMin = (prefs.getString("loop_duration", "5") ?: "5").toInt()
-        setupCamera()
+
+        val rtmpUrl = prefs.getString("rtmp_url", "")
+        if (!rtmpUrl.isNullOrEmpty()) {
+            rtmpStream?.startStream(rtmpUrl)
+        }
+
+        startRecordingFiles()
     }
 
     private fun setupCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
+        ProcessCameraProvider.getInstance(this).addListener({
             try {
-                val cameraProvider = cameraProviderFuture.get()
-                val isConcurrentSupported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val provider = ProcessCameraProvider.getInstance(this).get()
+                val concurrent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_CONCURRENT)
                 } else false
+                _isConcurrent.value = concurrent
 
-                if (isConcurrentSupported) bindConcurrentCameras(cameraProvider)
-                else bindSingleCamera(cameraProvider)
-            } catch (e: Exception) { Log.e(TAG, "Failed setupCamera", e) }
+                if (concurrent) bindConcurrentCameras(provider)
+                else bindSingleCamera(provider)
+            } catch (e: Exception) { Log.e(TAG, "setupCamera failed", e) }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun bindConcurrentCameras(cameraProvider: ProcessCameraProvider) {
-        val recorderBack = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
+        val recorderBack = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD)).build()
         videoCaptureBack = VideoCapture.withOutput(recorderBack)
-        val recorderFront = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
+        val recorderFront = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD)).build()
         videoCaptureFront = VideoCapture.withOutput(recorderFront)
 
-        val backConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_BACK_CAMERA, UseCaseGroup.Builder().addUseCase(videoCaptureBack!!).build(), this)
-        val frontConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_FRONT_CAMERA, UseCaseGroup.Builder().addUseCase(videoCaptureFront!!).build(), this)
+        backPreview = Preview.Builder().build()
+        frontPreview = Preview.Builder().build()
+
+        val streamPreview = Preview.Builder().build()
+        streamPreview.setSurfaceProvider { request ->
+            rtmpStream?.let { stream ->
+                request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(this)) {}
+            }
+        }
+
+        val backGroup = UseCaseGroup.Builder()
+            .addUseCase(videoCaptureBack!!)
+            .addUseCase(backPreview!!)
+            .addUseCase(streamPreview)
+            .build()
+        val frontGroup = UseCaseGroup.Builder()
+            .addUseCase(videoCaptureFront!!)
+            .addUseCase(frontPreview!!)
+            .build()
+
+        val backConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_BACK_CAMERA, backGroup, this)
+        val frontConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_FRONT_CAMERA, frontGroup, this)
 
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(listOf(backConfig, frontConfig))
-            startRecordingFiles()
-        } catch (exc: Exception) { bindSingleCamera(cameraProvider) }
+        } catch (exc: Exception) {
+            Log.e(TAG, "Concurrent binding failed", exc)
+            _isConcurrent.value = false
+            bindSingleCamera(cameraProvider)
+        }
     }
 
     private fun bindSingleCamera(cameraProvider: ProcessCameraProvider) {
         val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
         videoCaptureBack = VideoCapture.withOutput(recorder)
+        backPreview = Preview.Builder().build()
+
+        val streamPreview = Preview.Builder().build()
+        streamPreview.setSurfaceProvider { request ->
+            rtmpStream?.let { stream ->
+                request.provideSurface(stream.getGlInterface().surface, ContextCompat.getMainExecutor(this)) {}
+            }
+        }
+
         try {
             cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCaptureBack)
-            startRecordingFiles()
+            cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCaptureBack, backPreview, streamPreview)
         } catch (exc: Exception) { Log.e(TAG, "bindSingleCamera failed", exc) }
     }
 
     private fun startRecordingFiles() {
         val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date())
         recordingStartTime = System.currentTimeMillis()
+        telemetryRecorder = TelemetryRecorder(this, timestamp)
 
         videoCaptureBack?.let {
             val cv = ContentValues().apply {
@@ -190,7 +255,14 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
             override fun run() {
                 if (_isRecording.value) {
                     if (System.currentTimeMillis() - recordingStartTime >= loopDurationMin * 60 * 1000) restartRecording()
-                    else handler.postDelayed(this, 1000)
+                    else {
+                        try {
+                            locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { loc ->
+                                telemetryRecorder?.addData(loc.latitude, loc.longitude, loc.speed)
+                            }
+                        } catch (e: SecurityException) {}
+                        handler.postDelayed(this, 1000)
+                    }
                 }
             }
         }, 1000)
@@ -198,12 +270,20 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
 
     private fun restartRecording() {
         recordingBack?.stop(); recordingFront?.stop()
-        StorageManagerV2.cleanupOldFiles(this, 5)
-        handler.postDelayed({ if (_isRecording.value) startRecordingFiles() }, 1000)
+        telemetryRecorder?.save()
+        StorageManager.cleanupOldFiles(this, 5)
+        handler.postDelayed({ if (_isRecording.value) startRecordingFiles() }, 1500)
     }
 
     private fun lockCurrentEvent() {
-        Toast.makeText(this, "EVENT LOCKED", Toast.LENGTH_SHORT).show()
+        serviceScope.launch {
+            val recordings = recordingDao.getAll().take(4)
+            recordings.forEach { rec ->
+                StorageManager.lockFile(this@RecordingService, rec.fileName, rec.cameraType)
+                recordingDao.update(rec.copy(isLocked = true, fileName = rec.fileName.replace(".mp4", "_LOCKED.mp4")))
+            }
+            withContext(Dispatchers.Main) { Toast.makeText(this@RecordingService, "EVENT LOCKED", Toast.LENGTH_SHORT).show() }
+        }
     }
 
     private fun takeStillPhoto() { Toast.makeText(this, "PHOTO CAPTURED", Toast.LENGTH_SHORT).show() }
@@ -218,31 +298,50 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     override fun onSensorChanged(e: SensorEvent?) {
         e?.let {
             val g = Math.sqrt((it.values[0] * it.values[0] + it.values[1] * it.values[1] + it.values[2] * it.values[2]).toDouble()) / 9.81
+            _gForce.value = g.toFloat()
             if (g > 3.0) lockCurrentEvent()
         }
     }
 
+    override fun onLocationChanged(l: Location) { _speedKmh.value = l.speed * 3.6f }
+
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
-    override fun onLocationChanged(l: Location) {}
+    override fun onProviderEnabled(p: String) {}
+    override fun onProviderDisabled(p: String) {}
 
     private fun updateNotification(t: String, c: String) { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(t, c)) }
 
     private fun createNotification(t: String, c: String): Notification {
         val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle(t).setContentText(c).setSmallIcon(R.drawable.ic_rec)
-            .setContentIntent(pi).addAction(R.drawable.ic_rec, "Stop", PendingIntent.getService(this, 1, Intent(this, RecordingService::class.java).apply { action = ACTION_STOP }, PendingIntent.FLAG_IMMUTABLE))
-            .setOngoing(true).setPriority(NotificationCompat.PRIORITY_MAX).build()
+        val stopPi = PendingIntent.getService(this, 1, Intent(this, RecordingService::class.java).apply { action = ACTION_STOP }, PendingIntent.FLAG_IMMUTABLE)
+        val lockPi = PendingIntent.getService(this, 2, Intent(this, RecordingService::class.java).apply { action = ACTION_LOCK }, PendingIntent.FLAG_IMMUTABLE)
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(t).setContentText(c).setSmallIcon(R.drawable.ic_rec)
+            .setContentIntent(pi)
+            .addAction(R.drawable.ic_rec, "Stop", stopPi)
+            .addAction(R.drawable.ic_lock, "Lock", lockPi)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val sc = NotificationChannel(CHANNEL_ID, "Dashcam Service", NotificationManager.IMPORTANCE_HIGH)
+            val sc = NotificationChannel(CHANNEL_ID, "Dashcam Service", NotificationManager.IMPORTANCE_HIGH).apply {
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                description = "DroidDashCam Pro recording engine"
+            }
             getSystemService(NotificationManager::class.java).createNotificationChannel(sc)
         }
     }
 
     private fun stopRecordingService() {
         _isRecording.value = false
+        rtmpStream?.stopStream()
+        telemetryRecorder?.save()
         handler.removeCallbacksAndMessages(null)
         recordingBack?.stop(); recordingFront?.stop()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
@@ -255,4 +354,12 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         serviceScope.cancel()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     }
+
+    override fun onConnectionSuccess() { Log.d(TAG, "RTMP Success") }
+    override fun onConnectionFailed(reason: String) { Log.e(TAG, "RTMP Failed: $reason") }
+    override fun onConnectionStarted(url: String) {}
+    override fun onDisconnect() {}
+    override fun onNewBitrate(bitrate: Long) {}
+    override fun onAuthError() {}
+    override fun onAuthSuccess() {}
 }
