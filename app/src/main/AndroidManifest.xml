@@ -57,6 +57,27 @@
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".receiver.DashcamWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dashcam_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".service.RecordingTileService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_rec"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

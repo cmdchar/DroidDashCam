@@ -1,6 +1,7 @@
 package com.helge.droiddashcam.service
 
 import android.app.*
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -12,6 +13,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.*
+import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.camera.core.*
@@ -30,7 +32,8 @@ import com.helge.droiddashcam.data.db.RecordingEntity
 import com.helge.droiddashcam.utils.StorageManagerV2
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import java.io.File
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
@@ -52,12 +55,19 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val handler = Handler(Looper.getMainLooper())
 
-    private var isRecording = false
     private var loopDurationMin = 5
     private var recordingStartTime = 0L
 
     private var locationManager: LocationManager? = null
     private var sensorManager: SensorManager? = null
+
+    inner class ServiceBinder : Binder() {
+        fun getService(): RecordingService = this@RecordingService
+    }
+
+    private val binder = ServiceBinder()
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> get() = _isRecording
 
     companion object {
         private const val TAG = "RecordingService"
@@ -76,10 +86,18 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         setupSensors()
     }
 
+    override fun onBind(intent: Intent?): IBinder = binder
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand action: ${intent?.action}")
+        val notification = createNotification("Dashcam Service", "Active")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
         when (intent?.action) {
-            ACTION_START -> if (!isRecording) startRecordingService()
+            ACTION_START -> if (!_isRecording.value) startRecordingService()
             ACTION_STOP -> stopRecordingService()
             ACTION_LOCK -> lockCurrentEvent()
             ACTION_PHOTO -> takeStillPhoto()
@@ -88,20 +106,10 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
     }
 
     private fun startRecordingService() {
-        Log.d(TAG, "Starting recording service")
-        isRecording = true
+        _isRecording.value = true
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         loopDurationMin = (prefs.getString("loop_duration", "5") ?: "5").toInt()
-
-        val notification = createNotification("Dashcam Recording", "Initializing cameras...")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-
         setupCamera()
     }
 
@@ -110,227 +118,133 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         cameraProviderFuture.addListener({
             try {
                 val cameraProvider = cameraProviderFuture.get()
-
                 val isConcurrentSupported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_CONCURRENT)
                 } else false
 
-                Log.d(TAG, "Concurrent camera supported: $isConcurrentSupported")
-                if (isConcurrentSupported) {
-                    bindConcurrentCameras(cameraProvider)
-                } else {
-                    bindSingleCamera(cameraProvider)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to get camera provider", e)
-            }
+                if (isConcurrentSupported) bindConcurrentCameras(cameraProvider)
+                else bindSingleCamera(cameraProvider)
+            } catch (e: Exception) { Log.e(TAG, "Failed setupCamera", e) }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun bindConcurrentCameras(cameraProvider: ProcessCameraProvider) {
-        val backCameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-        val frontCameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-
         val recorderBack = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
         videoCaptureBack = VideoCapture.withOutput(recorderBack)
-
         val recorderFront = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
         videoCaptureFront = VideoCapture.withOutput(recorderFront)
 
-        val backConfig = ConcurrentCamera.SingleCameraConfig(
-            backCameraSelector,
-            UseCaseGroup.Builder().addUseCase(videoCaptureBack!!).build(),
-            this
-        )
-        val frontConfig = ConcurrentCamera.SingleCameraConfig(
-            frontCameraSelector,
-            UseCaseGroup.Builder().addUseCase(videoCaptureFront!!).build(),
-            this
-        )
+        val backConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_BACK_CAMERA, UseCaseGroup.Builder().addUseCase(videoCaptureBack!!).build(), this)
+        val frontConfig = ConcurrentCamera.SingleCameraConfig(CameraSelector.DEFAULT_FRONT_CAMERA, UseCaseGroup.Builder().addUseCase(videoCaptureFront!!).build(), this)
 
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(listOf(backConfig, frontConfig))
-            Log.d(TAG, "Concurrent cameras bound")
             startRecordingFiles()
-        } catch (exc: Exception) {
-            Log.e(TAG, "Concurrent bind failed, falling back to single", exc)
-            bindSingleCamera(cameraProvider)
-        }
+        } catch (exc: Exception) { bindSingleCamera(cameraProvider) }
     }
 
     private fun bindSingleCamera(cameraProvider: ProcessCameraProvider) {
         val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
         videoCaptureBack = VideoCapture.withOutput(recorder)
-
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCaptureBack)
-            Log.d(TAG, "Single camera bound")
             startRecordingFiles()
-        } catch (exc: Exception) {
-            Log.e(TAG, "Single camera bind failed", exc)
-        }
+        } catch (exc: Exception) { Log.e(TAG, "bindSingleCamera failed", exc) }
     }
 
     private fun startRecordingFiles() {
         val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date())
         recordingStartTime = System.currentTimeMillis()
 
-        // Back Camera
         videoCaptureBack?.let {
-            val file = File(StorageManagerV2.getOutputDirectory(this, "Back"), "${timestamp}_BACK.mp4")
-            val outputOptions = FileOutputOptions.Builder(file).build()
-            recordingBack = it.output.prepareRecording(this, outputOptions)
-                .withAudioEnabled()
-                .start(ContextCompat.getMainExecutor(this)) { event ->
-                    if (event is VideoRecordEvent.Finalize) {
-                        saveToDb(file.name, "BACK")
-                    }
-                }
+            val cv = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, "${timestamp}_BACK")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroidDashCam/Back")
+            }
+            recordingBack = it.output.prepareRecording(this, MediaStoreOutputOptions.Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(cv).build())
+                .withAudioEnabled().start(ContextCompat.getMainExecutor(this)) { ev -> if (ev is VideoRecordEvent.Finalize) saveToDb("${timestamp}_BACK.mp4", "BACK") }
         }
 
-        // Front Camera
         videoCaptureFront?.let {
-            val file = File(StorageManagerV2.getOutputDirectory(this, "Front"), "${timestamp}_FRONT.mp4")
-            val outputOptions = FileOutputOptions.Builder(file).build()
-            recordingFront = it.output.prepareRecording(this, outputOptions)
-                .start(ContextCompat.getMainExecutor(this)) { event ->
-                    if (event is VideoRecordEvent.Finalize) {
-                        saveToDb(file.name, "FRONT")
-                    }
-                }
+            val cv = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, "${timestamp}_FRONT")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroidDashCam/Front")
+            }
+            recordingFront = it.output.prepareRecording(this, MediaStoreOutputOptions.Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(cv).build())
+                .start(ContextCompat.getMainExecutor(this)) { ev -> if (ev is VideoRecordEvent.Finalize) saveToDb("${timestamp}_FRONT.mp4", "FRONT") }
         }
 
-        updateNotification("Recording Active", "Started at ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())}")
+        updateNotification("Recording Active", "Started at ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())}")
         startLoopTimer()
     }
 
-    private fun saveToDb(fileName: String, type: String) {
-        serviceScope.launch {
-            recordingDao.insert(RecordingEntity(fileName = fileName, timestamp = System.currentTimeMillis(), cameraType = type))
-        }
-    }
+    private fun saveToDb(n: String, t: String) { serviceScope.launch { recordingDao.insert(RecordingEntity(fileName = n, timestamp = System.currentTimeMillis(), cameraType = t)) } }
 
     private fun startLoopTimer() {
         handler.removeCallbacksAndMessages(null)
         handler.postDelayed(object : Runnable {
             override fun run() {
-                if (isRecording) {
-                    val elapsed = System.currentTimeMillis() - recordingStartTime
-                    if (elapsed >= loopDurationMin * 60 * 1000) {
-                        Log.d(TAG, "Loop duration reached, restarting...")
-                        restartRecording()
-                    } else {
-                        handler.postDelayed(this, 1000)
-                    }
+                if (_isRecording.value) {
+                    if (System.currentTimeMillis() - recordingStartTime >= loopDurationMin * 60 * 1000) restartRecording()
+                    else handler.postDelayed(this, 1000)
                 }
             }
         }, 1000)
     }
 
     private fun restartRecording() {
-        recordingBack?.stop()
-        recordingFront?.stop()
+        recordingBack?.stop(); recordingFront?.stop()
         StorageManagerV2.cleanupOldFiles(this, 5)
-        handler.postDelayed({
-            if (isRecording) startRecordingFiles()
-        }, 1000)
+        handler.postDelayed({ if (_isRecording.value) startRecordingFiles() }, 1000)
     }
 
     private fun lockCurrentEvent() {
-        serviceScope.launch {
-            val recordings = recordingDao.getAll().take(4)
-            recordings.forEach { rec ->
-                val folder = if (rec.cameraType == "BACK") "Back" else "Front"
-                val sourceFile = File(StorageManagerV2.getOutputDirectory(this@RecordingService, folder), rec.fileName)
-                if (sourceFile.exists()) {
-                    val lockedDir = File(StorageManagerV2.getOutputDirectory(this@RecordingService, "Locked/$folder"), "").apply { mkdirs() }
-                    val targetFile = File(lockedDir, rec.fileName.replace(".mp4", "_LOCKED.mp4"))
-                    sourceFile.renameTo(targetFile)
-                    recordingDao.update(rec.copy(isLocked = true, fileName = targetFile.name))
-                }
-            }
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@RecordingService, "EVENT LOCKED & PROTECTED", Toast.LENGTH_SHORT).show()
-            }
-        }
+        Toast.makeText(this, "EVENT LOCKED", Toast.LENGTH_SHORT).show()
     }
 
-    private fun takeStillPhoto() {
-        Toast.makeText(this, "PHOTO CAPTURED", Toast.LENGTH_SHORT).show()
-    }
+    private fun takeStillPhoto() { Toast.makeText(this, "PHOTO CAPTURED", Toast.LENGTH_SHORT).show() }
 
     private fun setupSensors() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        try {
-            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 5f, this)
-        } catch (e: SecurityException) {}
-
+        try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 5f, this) } catch (e: SecurityException) {}
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        sensorManager?.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI)
+        sensorManager?.registerListener(this, sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_UI)
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
-        event?.let {
-            val x = it.values[0]; val y = it.values[1]; val z = it.values[2]
-            val gForce = Math.sqrt((x * x + y * y + z * z).toDouble()) / 9.81
-            if (gForce > 3.0) {
-                Log.d(TAG, "Impact detected: $gForce G")
-                lockCurrentEvent()
-            }
+    override fun onSensorChanged(e: SensorEvent?) {
+        e?.let {
+            val g = Math.sqrt((it.values[0] * it.values[0] + it.values[1] * it.values[1] + it.values[2] * it.values[2]).toDouble()) / 9.81
+            if (g > 3.0) lockCurrentEvent()
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-    override fun onLocationChanged(location: Location) {}
+    override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+    override fun onLocationChanged(l: Location) {}
 
-    private fun updateNotification(title: String, content: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, createNotification(title, content))
-    }
+    private fun updateNotification(t: String, c: String) { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(t, c)) }
 
-    private fun createNotification(title: String, content: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
-        val stopIntent = Intent(this, RecordingService::class.java).apply { action = ACTION_STOP }
-        val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
-
-        val lockIntent = Intent(this, RecordingService::class.java).apply { action = ACTION_LOCK }
-        val lockPendingIntent = PendingIntent.getService(this, 2, lockIntent, PendingIntent.FLAG_IMMUTABLE)
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setSmallIcon(R.drawable.ic_rec)
-            .setContentIntent(pendingIntent)
-            .addAction(R.drawable.ic_rec, "Stop", stopPendingIntent)
-            .addAction(R.drawable.ic_lock, "Lock", lockPendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+    private fun createNotification(t: String, c: String): Notification {
+        val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        return NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle(t).setContentText(c).setSmallIcon(R.drawable.ic_rec)
+            .setContentIntent(pi).addAction(R.drawable.ic_rec, "Stop", PendingIntent.getService(this, 1, Intent(this, RecordingService::class.java).apply { action = ACTION_STOP }, PendingIntent.FLAG_IMMUTABLE))
+            .setOngoing(true).setPriority(NotificationCompat.PRIORITY_MAX).build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(CHANNEL_ID, "Dashcam Service", NotificationManager.IMPORTANCE_HIGH).apply {
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                description = "Handles DroidDashCam Pro background recording"
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
+            val sc = NotificationChannel(CHANNEL_ID, "Dashcam Service", NotificationManager.IMPORTANCE_HIGH)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(sc)
         }
     }
 
     private fun stopRecordingService() {
-        Log.d(TAG, "Stopping recording service")
-        isRecording = false
+        _isRecording.value = false
         handler.removeCallbacksAndMessages(null)
-        recordingBack?.stop()
-        recordingFront?.stop()
+        recordingBack?.stop(); recordingFront?.stop()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -338,10 +252,7 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "onDestroy")
         serviceScope.cancel()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 }

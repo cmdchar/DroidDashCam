@@ -12,7 +12,6 @@ object StorageManagerV2 {
     private const val TAG = "StorageManagerV2"
 
     fun getOutputDirectory(context: Context, subDir: String): File {
-        // We use public Movies directory for better visibility in Gallery
         val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
         val dashcamDir = File(moviesDir, "DroidDashCam/$subDir")
         if (!dashcamDir.exists()) {
@@ -30,33 +29,37 @@ object StorageManagerV2 {
     }
 
     fun cleanupOldFiles(context: Context, minFreeGB: Int) {
-        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-        val dashcamRoot = File(moviesDir, "DroidDashCam")
-        if (!dashcamRoot.exists()) return
+        val resolver = context.contentResolver
+        val projection = arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.SIZE)
+        val selection = "${MediaStore.Video.Media.DISPLAY_NAME} NOT LIKE ? AND ${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf("%LOCKED%", "%DroidDashCam%")
+        val sortOrder = "${MediaStore.Video.Media.DATE_MODIFIED} ASC"
 
         val stat = android.os.StatFs(Environment.getExternalStorageDirectory().path)
         val usableSpace = stat.availableBlocksLong * stat.blockSizeLong
         val minFreeBytes = minFreeGB.toLong() * 1024 * 1024 * 1024
 
         if (usableSpace < minFreeBytes) {
-            // Collect all non-locked mp4 files across subfolders
-            val files = mutableListOf<File>()
-            dashcamRoot.walkTopDown().forEach { file ->
-                if (file.isFile && file.extension == "mp4" && !file.name.contains("_LOCKED")) {
-                    files.add(file)
-                }
-            }
-
-            // Sort by oldest
-            files.sortBy { it.lastModified() }
-
-            var currentUsable = usableSpace
-            for (file in files) {
-                if (currentUsable >= minFreeBytes) break
-                val size = file.length()
-                if (file.delete()) {
-                    currentUsable += size
-                    Log.d(TAG, "Deleted old file: ${file.name}")
+            resolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) selection else null,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) selectionArgs else null,
+                sortOrder
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+                var currentUsable = usableSpace
+                while (cursor.moveToNext() && currentUsable < minFreeBytes) {
+                    val id = cursor.getLong(idColumn)
+                    val size = cursor.getLong(sizeColumn)
+                    val uri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                    try {
+                        resolver.delete(uri, null, null)
+                        currentUsable += size
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to delete old file", e)
+                    }
                 }
             }
         }
