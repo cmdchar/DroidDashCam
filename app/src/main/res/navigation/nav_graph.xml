@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/cameraFragment">
+
+    <fragment
+        android:id="@+id/cameraFragment"
+        android:name="com.helge.droiddashcam.ui.CameraFragment"
+        android:label="Camera"
+        tools:layout="@layout/fragment_camera">
+        <action
+            android:id="@+id/action_camera_to_gallery"
+            app:destination="@id/galleryFragment" />
+        <action
+            android:id="@+id/action_camera_to_settings"
+            app:destination="@id/settingsFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/galleryFragment"
+        android:name="com.helge.droiddashcam.ui.GalleryFragment"
+        android:label="Gallery"
+        tools:layout="@layout/fragment_gallery">
+        <action
+            android:id="@+id/action_gallery_to_review"
+            app:destination="@id/reviewFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.helge.droiddashcam.ui.SettingsFragment"
+        android:label="Settings">
+        <action
+            android:id="@+id/action_settings_to_viewer"
+            app:destination="@id/viewerFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/reviewFragment"
+        android:name="com.helge.droiddashcam.ui.ReviewFragment"
+        android:label="Review"
+        tools:layout="@layout/fragment_review">
+        <argument
+            android:name="videoUri"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/viewerFragment"
+        android:name="com.helge.droiddashcam.ui.ViewerFragment"
+        android:label="Remote Monitor"
+        tools:layout="@layout/fragment_viewer" />
+
+</navigation>

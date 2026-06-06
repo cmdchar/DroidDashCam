@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="horizontal"
+    android:padding="8dp">
+
+    <ImageButton
+        android:id="@+id/widget_btn_start"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_rec"
+        app:tint="@color/pro_blue" />
+
+    <ImageButton
+        android:id="@+id/widget_btn_stop"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_rec"
+        app:tint="@color/red_rec" />
+
+    <ImageButton
+        android:id="@+id/widget_btn_lock"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_lock"
+        app:tint="@color/white" />
+
+</LinearLayout>
