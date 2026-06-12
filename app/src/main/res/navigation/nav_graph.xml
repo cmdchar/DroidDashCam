@@ -7,7 +7,7 @@
 
     <fragment
         android:id="@+id/cameraFragment"
-        android:name="com.helge.droiddashcam.ui.CameraFragment"
+        android:name="com.helge.prodashcam.ui.CameraFragment"
         android:label="Camera"
         tools:layout="@layout/fragment_camera">
         <action
@@ -20,7 +20,7 @@
 
     <fragment
         android:id="@+id/galleryFragment"
-        android:name="com.helge.droiddashcam.ui.GalleryFragment"
+        android:name="com.helge.prodashcam.ui.GalleryFragment"
         android:label="Gallery"
         tools:layout="@layout/fragment_gallery">
         <action
@@ -30,7 +30,7 @@
 
     <fragment
         android:id="@+id/settingsFragment"
-        android:name="com.helge.droiddashcam.ui.SettingsFragment"
+        android:name="com.helge.prodashcam.ui.SettingsFragment"
         android:label="Settings">
         <action
             android:id="@+id/action_settings_to_viewer"
@@ -39,7 +39,7 @@
 
     <fragment
         android:id="@+id/reviewFragment"
-        android:name="com.helge.droiddashcam.ui.ReviewFragment"
+        android:name="com.helge.prodashcam.ui.ReviewFragment"
         android:label="Review"
         tools:layout="@layout/fragment_review">
         <argument
@@ -49,7 +49,7 @@
 
     <fragment
         android:id="@+id/viewerFragment"
-        android:name="com.helge.droiddashcam.ui.ViewerFragment"
+        android:name="com.helge.prodashcam.ui.ViewerFragment"
         android:label="Remote Monitor"
         tools:layout="@layout/fragment_viewer" />
 

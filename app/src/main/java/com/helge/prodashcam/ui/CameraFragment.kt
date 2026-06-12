@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.ui
+package com.helge.prodashcam.ui
 
 import android.Manifest
 import android.content.*
@@ -16,10 +16,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
-import com.helge.droiddashcam.R
-import com.helge.droiddashcam.databinding.FragmentCameraBinding
-import com.helge.droiddashcam.service.RecordingService
-import com.helge.droiddashcam.utils.StorageManager
+import com.helge.prodashcam.R
+import com.helge.prodashcam.databinding.FragmentCameraBinding
+import com.helge.prodashcam.service.RecordingService
+import com.helge.prodashcam.utils.StorageManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch

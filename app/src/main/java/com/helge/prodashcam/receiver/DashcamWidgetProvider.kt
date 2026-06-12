@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.receiver
+package com.helge.prodashcam.receiver
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -6,8 +6,8 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
-import com.helge.droiddashcam.R
-import com.helge.droiddashcam.service.RecordingService
+import com.helge.prodashcam.R
+import com.helge.prodashcam.service.RecordingService
 
 class DashcamWidgetProvider : AppWidgetProvider() {
 

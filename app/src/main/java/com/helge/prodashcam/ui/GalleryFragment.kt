@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.ui
+package com.helge.prodashcam.ui
 
 import android.content.ContentUris
 import android.os.Build
@@ -11,9 +11,9 @@ import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.bumptech.glide.Glide
-import com.helge.droiddashcam.R
-import com.helge.droiddashcam.databinding.FragmentGalleryBinding
-import com.helge.droiddashcam.databinding.ItemVideoBinding
+import com.helge.prodashcam.R
+import com.helge.prodashcam.databinding.FragmentGalleryBinding
+import com.helge.prodashcam.databinding.ItemVideoBinding
 import java.text.SimpleDateFormat
 import java.util.*
 

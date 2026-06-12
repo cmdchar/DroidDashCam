@@ -126,13 +126,13 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <com.helge.droiddashcam.ui.views.CircularGaugeView
+        <com.helge.prodashcam.ui.views.CircularGaugeView
             android:id="@+id/gauge_speed"
             android:layout_width="120dp"
             android:layout_height="120dp"
             android:layout_marginEnd="16dp" />
 
-        <com.helge.droiddashcam.ui.views.CircularGaugeView
+        <com.helge.prodashcam.ui.views.CircularGaugeView
             android:id="@+id/gauge_gforce"
             android:layout_width="100dp"
             android:layout_height="100dp"

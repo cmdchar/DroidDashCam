@@ -1,4 +1,4 @@
-package com.helge.droiddashcam
+package com.helge.prodashcam
 
 import org.junit.Test
 

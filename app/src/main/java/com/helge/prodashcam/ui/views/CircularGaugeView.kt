@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.ui.views
+package com.helge.prodashcam.ui.views
 
 import android.content.Context
 import android.graphics.Canvas

@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.utils
+package com.helge.prodashcam.utils
 
 import android.content.Context
 import android.util.Log

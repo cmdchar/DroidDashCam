@@ -1,9 +1,9 @@
-package com.helge.droiddashcam.di
+package com.helge.prodashcam.di
 
 import android.content.Context
 import androidx.room.Room
-import com.helge.droiddashcam.data.db.AppDatabase
-import com.helge.droiddashcam.data.db.RecordingDao
+import com.helge.prodashcam.data.db.AppDatabase
+import com.helge.prodashcam.data.db.RecordingDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn

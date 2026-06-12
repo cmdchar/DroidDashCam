@@ -7,15 +7,15 @@ plugins {
 }
 
 android {
-    namespace = "com.helge.droiddashcam"
+    namespace = "com.helge.prodashcam"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.helge.droiddashcam"
+        applicationId = "com.helge.prodashcam"
         minSdk = 24
         targetSdk = 35
         versionCode = 2
-        versionName = "2.0"
+        versionName = "1.0-pro"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # MediaMTX (formerly rtsp-simple-server) setup script for Debian/Ubuntu
-# This server acts as a bridge for the DroidDashCam project.
+# This server acts as a bridge for the ProDashcam project.
 # It receives a single PIP-mixed RTMP stream from the dashcam and serves it to viewers.
 
 set -e

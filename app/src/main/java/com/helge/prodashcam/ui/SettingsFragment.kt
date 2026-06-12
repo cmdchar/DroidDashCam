@@ -1,11 +1,11 @@
-package com.helge.droiddashcam.ui
+package com.helge.prodashcam.ui
 
 import android.os.Bundle
 import android.view.View
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.navigation.fragment.findNavController
-import com.helge.droiddashcam.R
+import com.helge.prodashcam.R
 
 class SettingsFragment : PreferenceFragmentCompat() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
@@ -19,6 +19,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        view.setBackgroundColor(resources.getColor(com.helge.droiddashcam.R.color.black, null))
+        view.setBackgroundColor(resources.getColor(com.helge.prodashcam.R.color.black, null))
     }
 }

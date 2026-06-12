@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.ui
+package com.helge.prodashcam.ui
 
 import android.net.Uri
 import android.os.Bundle
@@ -12,7 +12,7 @@ import androidx.fragment.app.Fragment
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.helge.droiddashcam.databinding.FragmentReviewBinding
+import com.helge.prodashcam.databinding.FragmentReviewBinding
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback

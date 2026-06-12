@@ -1,9 +1,9 @@
-package com.helge.droiddashcam
+package com.helge.prodashcam
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.enableEdgeToEdge
-import com.helge.droiddashcam.databinding.ActivityMainBinding
+import com.helge.prodashcam.databinding.ActivityMainBinding
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint

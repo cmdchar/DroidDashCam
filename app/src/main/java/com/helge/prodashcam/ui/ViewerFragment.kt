@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.ui
+package com.helge.prodashcam.ui
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -14,7 +14,7 @@ import androidx.media3.datasource.rtmp.RtmpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.helge.droiddashcam.databinding.FragmentViewerBinding
+import com.helge.prodashcam.databinding.FragmentViewerBinding
 
 class ViewerFragment : Fragment() {
     private var _binding: FragmentViewerBinding? = null

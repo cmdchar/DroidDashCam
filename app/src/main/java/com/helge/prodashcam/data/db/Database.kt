@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.data.db
+package com.helge.prodashcam.data.db
 
 import androidx.room.*
 

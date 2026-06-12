@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.service
+package com.helge.prodashcam.service
 
 import android.app.*
 import android.content.ContentValues
@@ -25,12 +25,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.preference.PreferenceManager
-import com.helge.droiddashcam.MainActivity
-import com.helge.droiddashcam.R
-import com.helge.droiddashcam.data.db.RecordingDao
-import com.helge.droiddashcam.data.db.RecordingEntity
-import com.helge.droiddashcam.utils.StorageManager
-import com.helge.droiddashcam.utils.TelemetryRecorder
+import com.helge.prodashcam.MainActivity
+import com.helge.prodashcam.R
+import com.helge.prodashcam.data.db.RecordingDao
+import com.helge.prodashcam.data.db.RecordingEntity
+import com.helge.prodashcam.utils.StorageManager
+import com.helge.prodashcam.utils.TelemetryRecorder
 import com.pedro.library.rtmp.RtmpStream
 import com.pedro.common.ConnectChecker
 import dagger.hilt.android.AndroidEntryPoint
@@ -92,10 +92,10 @@ class RecordingService : Service(), LifecycleOwner, LocationListener, SensorEven
         private const val TAG = "RecordingService"
         const val CHANNEL_ID = "DashcamRecordingChannel"
         const val NOTIFICATION_ID = 101
-        const val ACTION_START = "com.helge.droiddashcam.START"
-        const val ACTION_STOP = "com.helge.droiddashcam.STOP"
-        const val ACTION_LOCK = "com.helge.droiddashcam.LOCK"
-        const val ACTION_PHOTO = "com.helge.droiddashcam.PHOTO"
+        const val ACTION_START = "com.helge.prodashcam.START"
+        const val ACTION_STOP = "com.helge.prodashcam.STOP"
+        const val ACTION_LOCK = "com.helge.prodashcam.LOCK"
+        const val ACTION_PHOTO = "com.helge.prodashcam.PHOTO"
     }
 
     override fun onCreate() {

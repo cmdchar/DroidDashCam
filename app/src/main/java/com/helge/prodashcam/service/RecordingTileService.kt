@@ -1,4 +1,4 @@
-package com.helge.droiddashcam.service
+package com.helge.prodashcam.service
 
 import android.content.Intent
 import android.service.quicksettings.Tile

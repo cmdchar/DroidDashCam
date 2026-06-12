@@ -1,4 +1,4 @@
-package com.helge.droiddashcam
+package com.helge.prodashcam
 
 import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
